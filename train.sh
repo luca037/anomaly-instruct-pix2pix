@@ -16,7 +16,7 @@ CUDA_VISIBLE_DEVICES=2 accelerate launch finetune_instruct_pix2pix.py \
   --mixed_precision="bf16" \
   --allow_tf32 \
   --val_image_url="/home/luca_piai/big_disk/datasets/my_dataset/hazelnut_good_000.png" \
-  --validation_prompt="Cracked Shell: The shell is split by a visible crack, exposing the inner kernel." \
+  --validation_prompt="add a crack" \
   --validation_epochs=5 \
   --num_validation_images=2 \
   --report_to="wandb" \
