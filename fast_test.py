@@ -1,12 +1,33 @@
-import argparse
 import os
+import argparse
+
 import torch
+import numpy as np
+
 from PIL import Image
 from diffusers import StableDiffusionInstructPix2PixPipeline, UNet2DConditionModel, EulerAncestralDiscreteScheduler
-import numpy as np
 
 import textwrap
 import matplotlib.pyplot as plt
+
+# Default paths mapping
+category_paths = {
+    "bottle": "/home/luca_piai/big_disk/datasets/mvtec/bottle/test/good/001.png",
+    "cable": "/home/luca_piai/big_disk/datasets/mvtec/cable/test/good/001.png",
+    "capsule": "/home/luca_piai/big_disk/datasets/mvtec/capsule/test/good/001.png",
+    "carpet": "/home/luca_piai/big_disk/datasets/mvtec/carpet/test/good/001.png",
+    "grid": "/home/luca_piai/big_disk/datasets/mvtec/grid/test/good/001.png",
+    "hazelnut": "/home/luca_piai/big_disk/datasets/mvtec/hazelnut/test/good/011.png",
+    "leather": "/home/luca_piai/big_disk/datasets/mvtec/leather/test/good/001.png",
+    "metal_nut": "/home/luca_piai/big_disk/datasets/mvtec/metal_nut/test/good/001.png",
+    "pill": "/home/luca_piai/big_disk/datasets/mvtec/pill/test/good/013.png",
+    "screw": "/home/luca_piai/big_disk/datasets/mvtec/screw/test/good/001.png",
+    "tile": "/home/luca_piai/big_disk/datasets/mvtec/tile/test/good/001.png",
+    "toothbrush": "/home/luca_piai/big_disk/datasets/mvtec/toothbrush/test/good/001.png",
+    "transistor": "/home/luca_piai/big_disk/datasets/mvtec/transistor/test/good/003.png",
+    "wood": "/home/luca_piai/big_disk/datasets/mvtec/wood/test/good/001.png",
+    "zipper": "/home/luca_piai/big_disk/datasets/mvtec/zipper/test/good/001.png"
+}
 
 
 def plot_grid(image_paths, prompts, output_filename="grid.png", use_heatmap=False):
@@ -108,10 +129,12 @@ def plot_grid(image_paths, prompts, output_filename="grid.png", use_heatmap=Fals
 
 def main():
     parser = argparse.ArgumentParser(description="Run InstructPix2Pix and generate comparison grids.")
-    parser.add_argument("--category", type=str, choices=["hazelnut", "pill"], default="hazelnut",
+    parser.add_argument("--category", type=str, choices=list(category_paths.keys()), default="hazelnut",
                         help="Category to use for the input image (hazelnut or pill)")
     parser.add_argument("--prompt", type=str, default="scratched imprint",
                         help="Prompt for the image generation")
+    parser.add_argument("--device", type=str, required=True, 
+                        help="Device to run the model on (e.g., 'cuda:0', 'cuda:1', 'cpu')")
     parser.add_argument("--output_path", type=str, default=None,
                         help="Path to save the output grid image")
     parser.add_argument("--heatmap", action="store_true", default=True,
@@ -121,32 +144,25 @@ def main():
     
     args = parser.parse_args()
 
-    # Default paths mapping
-    category_paths = {
-        "hazelnut": "/home/luca_piai/big_disk/datasets/mvtec/hazelnut/test/good/011.png",
-        "pill": "/home/luca_piai/big_disk/datasets/mvtec/pill/test/good/013.png"
-    }
     input_image_path = category_paths[args.category]
 
     output_filename = args.output_path
     if output_filename is None:
         output_filename = f"{args.prompt.replace(' ', '_')}_grid.jpg"
 
-    # 1. Define your paths
     base_model_id = "timbrooks/instruct-pix2pix" 
     checkpoint_unet_path = "/home/luca_piai/big_disk/mirage-anomaly-model-fine_tune_pix2pix/checkpoint-2000/unet"
 
     print(f"Loading custom UNet from {checkpoint_unet_path}...")
     
-    # 2. Load JUST your trained UNet
+    # Load trained UNet
     trained_unet = UNet2DConditionModel.from_pretrained(
         checkpoint_unet_path, 
         torch_dtype=torch.bfloat16
     )
 
+    # Load the full pipeline, but inject your custom UNet
     print("Loading base pipeline and injecting UNet...")
-
-    # 3. Load the full pipeline, but inject your custom UNet
     pipe = StableDiffusionInstructPix2PixPipeline.from_pretrained(
         base_model_id,
         unet=trained_unet,
@@ -154,22 +170,19 @@ def main():
         safety_checker=None,
         requires_safety_checker=False
     )
-    pipe.to("cuda:1")
+    pipe.to(args.device)
 
-    # 4. Swap the scheduler for better InstructPix2Pix results
+    # Swap the scheduler for better InstructPix2Pix results
     pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
 
-    # 5. Load and resize the base image
+    # Load and resize the base image
     init_image = Image.open(input_image_path).convert("RGB").resize((512, 512))
-
     print(f"Applying prompt: '{args.prompt}'...")
 
-    # 6. Generate images
+    # Generate images
     img_paths = []
-    
     # Output directory for individual images based on output_filename
     out_dir = os.path.dirname(output_filename) or "."
-    
     for i in range(3):
         output_image = pipe(
             prompt=args.prompt,
@@ -181,7 +194,6 @@ def main():
 
         out_img = os.path.join(out_dir, f"{args.prompt.replace(' ', '_')}_{i}.png")
         output_image.save(out_img)
-        print(f"Success! Saved as {out_img}")
         img_paths.append(out_img)
 
     plot_grid(

@@ -7,9 +7,18 @@ from diffusers import StableDiffusionInstructPix2PixPipeline, UNet2DConditionMod
 from tqdm import tqdm
 
 
-DEVICE = "cuda:1"
-BASE_MVTEC_PATH = "/home/luca_piai/big_disk/datasets/mvtec/"
+###
+### Settings
+###
 
+BASE_MVTEC_PATH = "/home/luca_piai/big_disk/datasets/mvtec/"
+OUTPUT_BASE_PATH = "./output/"
+OUTPUT_JSON = "results.json"
+
+
+###
+### Functions
+###
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate fine-tuned InstructPix2Pix models.")
@@ -23,7 +32,13 @@ def parse_args():
         "--category", 
         type=str, 
         required=True, 
-        help="Name of the model/category (used for the output folder and JSON key)."
+        help="Category/class to evaluate (e.g., 'hazelnut', 'pill', etc.)."
+    )
+    parser.add_argument(
+        "--id", 
+        type=str, 
+        required=True, 
+        help="Name of the model (used for the output folder and JSON key)."
     )
     parser.add_argument(
         "--unet_path", 
@@ -36,7 +51,14 @@ def parse_args():
         action="store_true", 
         help="Skip UNet replacement and test the vanilla InstructPix2Pix model."
     )
+    parser.add_argument(
+        "--device", 
+        type=str,
+        required=True,
+        help="Device to run the model on (e.g., 'cuda:0', 'cpu')."
+    )
     return parser.parse_args()
+
 
 def main():
     args = parse_args()
@@ -45,26 +67,33 @@ def main():
     if not args.baseline and not args.unet_path:
         raise ValueError("You must provide --unet_path unless the --baseline flag is used.")
 
-    # 1. Load the JSON file
+    # Load the JSON file
     print(f"Loading JSON data from {args.json_path}...")
-    with open(args.json_path, 'r') as f:
-        data = json.load(f)
+    # Create a copy of input data, if necessary
+    if not os.path.exists(OUTPUT_JSON):
+        with open(args.json_path, 'r') as f:
+            input_data = json.load(f)
+        with open(OUTPUT_JSON, 'w') as f:
+            json.dump(input_data, f)
 
-    input_paths = data.get("input", [])
-    prompts = data.get("prompt", [])
+    with open(OUTPUT_JSON, 'r') as f:
+        output_data = json.load(f)
+
+    input_paths = output_data[args.category].get("inputs", [])
+    prompts = output_data[args.category].get("prompts", [])
 
     if not input_paths or len(input_paths) != len(prompts):
-        raise ValueError("The 'input' and 'prompt' lists must exist and be the same length.")
+        raise ValueError("The 'inputs' and 'prompts' lists must exist and be the same length.")
 
     # Initialize the list for this specific category
-    data["output"][args.category] = []
+    output_data[args.category]['outputs'] = {args.id : []}
 
-    # 2. Setup the output directory
-    output_dir = os.path.join("output", args.category)
+    # Setup the output directory
+    output_dir = os.path.join(OUTPUT_BASE_PATH, args.id)
     os.makedirs(output_dir, exist_ok=True)
     print(f"Images will be saved to: {output_dir}")
 
-    # 3. Load the Model Pipeline
+    # Load the Model Pipeline
     base_model_id = "timbrooks/instruct-pix2pix"
     weight_dtype = torch.bfloat16
 
@@ -91,15 +120,13 @@ def main():
 
     # Swap scheduler and move to GPU
     pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
-    pipe.to(DEVICE)
+    pipe.to(args.device)
 
-    # 4. The Generation Loop
+    # The Generation Loop
     print(f"Starting generation for {len(input_paths)} images...")
-    
     for i, (img_path, prompt) in enumerate(tqdm(zip(input_paths, prompts), total=len(input_paths))):
-        # Format the output filename (test_good_000.png)
-        file_name = img_path.replace('/', '_')
-        save_path = os.path.join(output_dir, file_name)
+        file_name = f"{args.category}_{i:03d}.png"
+        save_path = os.path.join(os.path.abspath(output_dir), file_name)
 
         # Load and prep the image
         img_path = os.path.join(BASE_MVTEC_PATH, img_path)
@@ -116,12 +143,11 @@ def main():
 
         # Save image and record path
         out_image.save(save_path)
-        data["output"][args.category].append(save_path)
+        output_data[args.category]['outputs'][args.id].append(save_path)
 
-    # 5. Save the updated JSON file
-    print("Updating JSON file...")
-    with open(args.json_path, 'w') as f:
-        json.dump(data, f, indent=4)
+    # Update results JSON file
+    with open(OUTPUT_JSON, 'w') as f:
+        json.dump(output_data, f, indent=4)
 
     print(f"Successfully finished testing category: '{args.category}'!")
 

@@ -1,11 +1,8 @@
 import argparse
 import json
-import os
 import textwrap
 import matplotlib.pyplot as plt
 from PIL import Image
-
-BASE_MVTEC_PATH = "/home/luca_piai/big_disk/datasets/mvtec/"
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate a comparison grid from the evaluation JSON.")
@@ -18,7 +15,7 @@ def parse_args():
     parser.add_argument(
         "--output_image", 
         type=str, 
-        default="model_comparison_grid.png", 
+        default="model_comparison_grid.jpg", 
         help="Name of the final output grid image."
     )
     parser.add_argument(
@@ -32,6 +29,12 @@ def parse_args():
         type=int,
         default=None,
         help="Ending index for the input images to include in the grid."
+    )
+    parser.add_argument(
+        "--category",
+        type=str,
+        required=True,
+        help="Category of the images to include in the grid."
     )
     return parser.parse_args()
 
@@ -47,14 +50,15 @@ def load_image(path):
 def main():
     args = parse_args()
 
-    # 1. Load the JSON data
+    # Load the JSON data
     print(f"Loading data from {args.json_path}...")
     with open(args.json_path, 'r') as f:
-        data = json.load(f)
+        input_data = json.load(f)
 
-    inputs = data.get("input", [])[args.start:args.end]
-    prompts = data.get("prompt", [])[args.start:args.end]
-    outputs = data.get("output", {})
+    category = input_data.get(args.category, "unknown_category")
+    inputs  = category.get("inputs",  [])[args.start:args.end]
+    prompts = category.get("prompts", [])[args.start:args.end]
+    outputs = category.get("outputs", {})
 
     if not inputs:
         raise ValueError("No 'input' data found in the JSON.")
@@ -78,7 +82,7 @@ def main():
         # --- ROW 0: Input Image & Prompt ---
         ax_input = axes[0, col_idx]
 
-        img_input = load_image(BASE_MVTEC_PATH + inputs[col_idx])
+        img_input = load_image(inputs[col_idx])
         ax_input.imshow(img_input)
         
         # Format the prompt to wrap text so it doesn't overlap with neighbors
