@@ -23,6 +23,7 @@ import math
 from pathlib import Path
 from typing import Optional
 
+import inspect
 import accelerate
 import datasets
 import diffusers
@@ -405,7 +406,7 @@ def parse_args():
         "--torch_compile",
         default=False,
         action="store_true",
-        help="Whether or ont to use torch.complie."
+        help="Whether or not to use torch.complie."
     )
 
     args = parser.parse_args()
@@ -598,7 +599,7 @@ def main():
                 ema_unet.to(accelerator.device)
                 del load_model
 
-            for i in range(len(models)):
+            for _ in range(len(models)):
                 # pop models so that they are not loaded again
                 model = models.pop()
 
@@ -606,9 +607,12 @@ def main():
                 load_model = UNet2DConditionModel.from_pretrained(
                     input_dir, subfolder="unet"
                 )
-                model.register_to_config(**load_model.config)
-
-                model.load_state_dict(load_model.state_dict())
+                
+                # Unwrap the model if it was compiled by torch.compile
+                target_model = getattr(model, "_orig_mod", model)
+                
+                target_model.register_to_config(**load_model.config)
+                target_model.load_state_dict(load_model.state_dict())
                 del load_model
 
         accelerator.register_save_state_pre_hook(save_model_hook)
@@ -640,8 +644,13 @@ def main():
             )
 
         optimizer_cls = bnb.optim.AdamW8bit
+        fused_available = 'fused' in inspect.signature(bnb.optim.AdamW8bit).parameters
     else:
         optimizer_cls = torch.optim.AdamW
+        fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
+
+    if fused_available:
+        print("Using fused=True.")
 
     optimizer = optimizer_cls(
         unet.parameters(),
@@ -649,6 +658,7 @@ def main():
         betas=(args.adam_beta1, args.adam_beta2),
         weight_decay=args.adam_weight_decay,
         eps=args.adam_epsilon,
+        fused=fused_available
     )
 
     # Get the datasets: you can either provide your own training and evaluation files (see below)
@@ -1089,7 +1099,6 @@ def main():
                     ema_unet.copy_to(unet.parameters())
                 pipeline = StableDiffusionInstructPix2PixPipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
-                    #unet=unet,
                     unet=getattr(accelerator.unwrap_model(unet), "_orig_mod", accelerator.unwrap_model(unet)),
                     revision=args.revision,
                     torch_dtype=weight_dtype,
