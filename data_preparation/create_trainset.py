@@ -126,16 +126,14 @@ def main():
         clean_cable_defect_prompt(MVTEC_CSV)
     
     # Clip percentages
-    if args.mvtec_perc > 1.0 or args.mvtec_perc < 0.0:
-        args.mvtec_perc = 1.0
-    if args.visa_perc > 1.0 or args.visa_perc < 0.0:
-        args.visa_perc = 1.0
+    assert 0.0 <= args.mvtec_perc <= 1.0, "mvtec_perc must be between 0.0 and 1.0"
+    assert 0.0 <= args.visa_perc <= 1.0, "visa_perc must be between 0.0 and 1.0"
     
     # Process CSVs
     all_entries = []
     if not len(MVTEC_CATEGORIES) or  MVTEC_CATEGORIES[0] is not None:
         print("Processing MVTEC data...")
-        all_entries.extend(process_csv(MVTEC_CSV, MVTEC_PATH, MVTEC_CATEGORIES, MIRAGE_PATH, ds_name='mvtec', perc=args.mvtec_pec))
+        all_entries.extend(process_csv(MVTEC_CSV, MVTEC_PATH, MVTEC_CATEGORIES, MIRAGE_PATH, ds_name='mvtec', perc=args.mvtec_perc))
     if not len(VISA_CATEGORIES) or VISA_CATEGORIES[0] is not None:
         print("Processing VISA data...")
         all_entries.extend(process_csv(VISA_CSV, VISA_PATH, VISA_CATEGORIES, MIRAGE_PATH, ds_name='visa', perc=args.visa_perc))
