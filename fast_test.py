@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 
 # Default paths mapping
 category_paths = {
+    # MVTec dataset
     "bottle": "/home/luca_piai/big_disk/datasets/mvtec/bottle/test/good/001.png",
     "cable": "/home/luca_piai/big_disk/datasets/mvtec/cable/test/good/001.png",
     "capsule": "/home/luca_piai/big_disk/datasets/mvtec/capsule/test/good/001.png",
@@ -26,7 +27,11 @@ category_paths = {
     "toothbrush": "/home/luca_piai/big_disk/datasets/mvtec/toothbrush/test/good/001.png",
     "transistor": "/home/luca_piai/big_disk/datasets/mvtec/transistor/test/good/003.png",
     "wood": "/home/luca_piai/big_disk/datasets/mvtec/wood/test/good/001.png",
-    "zipper": "/home/luca_piai/big_disk/datasets/mvtec/zipper/test/good/001.png"
+    "zipper": "/home/luca_piai/big_disk/datasets/mvtec/zipper/test/good/001.png",
+    # VISA dataset
+    #"pcb4": "/home/luca_piai/big_disk/datasets/visa/pcb4/Data/Images/Normal/0000.JPG",
+    #"capsules": "/home/luca_piai/big_disk/datasets/visa/capsules/Data/Images/Normal/000.JPG",
+    #"candle": "/home/luca_piai/big_disk/datasets/visa/candle/Data/Images/Normal/0000.JPG"
 }
 
 
@@ -151,7 +156,8 @@ def main():
         output_filename = f"{args.prompt.replace(' ', '_')}_grid.jpg"
 
     base_model_id = "timbrooks/instruct-pix2pix" 
-    checkpoint_unet_path = "/home/luca_piai/big_disk/mirage-anomaly-model-fine_tune_pix2pix/checkpoint-2000/unet"
+    #checkpoint_unet_path = "/home/luca_piai/big_disk/mirage-anomaly-model-fine_tune_pix2pix/checkpoint-2000/unet"
+    checkpoint_unet_path = "/home/luca_piai/big_disk/mirage-anomaly-model-fine_tune_pix2pix_mvtec_7/unet"
 
     print(f"Loading custom UNet from {checkpoint_unet_path}...")
     

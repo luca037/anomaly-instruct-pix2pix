@@ -1,24 +1,25 @@
 CUDA_VISIBLE_DEVICES=2 accelerate launch finetune_instruct_pix2pix.py \
-  --pretrained_model_name_or_path="/home/luca_piai/big_disk/mirage_resume_base" \
-  --train_data_dir="/home/luca_piai/big_disk/datasets/my_dataset/" \
+  --pretrained_model_name_or_path="timbrooks/instruct-pix2pix" \
+  --train_data_dir="/home/luca_piai/big_disk/datasets/train_set/" \
+  --output_dir="/home/luca_piai/big_disk/mirage-anomaly-model-fine_tune_pix2pix_mvtec_7/" \
   --original_image_column="original_image" \
   --edited_image_column="edited_image" \
   --edit_prompt_column="edit_prompt" \
-  --output_dir="/home/luca_piai/big_disk/mirage-anomaly-model-fine_tune_pix2pix" \
   --resolution=512 \
-  --train_batch_size=8 \
-  --gradient_accumulation_steps=2 \
+  --train_batch_size=8 --gradient_accumulation_steps=2 \
+  --use_ema \
+  --dataloader_num_workers=8 \
   --learning_rate=5e-5 \
+  --random_flip \
+  --max_train_steps=12000 \
   --lr_warmup_steps=500 \
-  --max_train_steps=5000 \
   --checkpointing_steps=1000 \
-  --dataloader_num_workers=4 \
-  --mixed_precision="bf16" \
-  --allow_tf32 \
   --val_image_url="/home/luca_piai/big_disk/datasets/my_dataset/hazelnut_good_000.png" \
   --validation_prompt="add a crack" \
   --validation_epochs=5 \
-  --num_validation_images=2 \
+  --num_validation_images=4 \
+  --mixed_precision="bf16" \
+  --allow_tf32 \
+  --torch_compile \
   --report_to="wandb" \
   --seed=42 \
-  --torch_compile
