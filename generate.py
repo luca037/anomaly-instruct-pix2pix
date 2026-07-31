@@ -1,5 +1,18 @@
 """
-Unified image generation script for InstructPix2Pix.
+Unified image generation script — supports multiple model backends.
+
+Currently supported backends (selectable via ``--backend``):
+
+  • **ip2p**  – InstructPix2Pix (``timbrooks/instruct-pix2pix``)
+                Pass a fine-tuned UNet directory with ``--weights_path``
+                or omit it for the vanilla baseline.
+
+  • **flux2** – FLUX.2 Klein 4B (``black-forest-labs/FLUX.2-klein-4B``)
+                Pass a LoRA weights directory with ``--weights_path``
+                or omit it for the vanilla baseline.
+
+Adding a new backend is straightforward: define a loader function and
+register it in the ``BACKENDS`` dictionary.
 
 This script provides two subcommands:
 
@@ -17,42 +30,55 @@ This script provides two subcommands:
 Usage examples
 ==============
 
-# ── compare ──────────────────────────────────────────────────────────
-# Fine-tuned model (incremental – skips already-generated pairs):
+# ── compare (InstructPix2Pix) ────────────────────────────────────────
+# Fine-tuned model:
     uv run generate.py compare \\
+        --backend ip2p \\
         --test_set ./data_preparation/test_set.json \\
         --category hazelnut \\
         --model_id mvtec_7 \\
-        --unet_path /path/to/checkpoint/unet \\
+        --weights_path /path/to/checkpoint/unet \\
         --device cuda:1
 
-# Vanilla baseline (omit --unet_path):
+# Vanilla baseline (omit --weights_path):
     uv run generate.py compare \\
+        --backend ip2p \\
         --test_set ./data_preparation/test_set.json \\
         --category pill \\
         --model_id vanilla \\
         --device cuda:1
 
+# ── compare (FLUX.2 Klein) ───────────────────────────────────────────
+    uv run generate.py compare \\
+        --backend flux2 \\
+        --test_set ./data_preparation/test_set.json \\
+        --category hazelnut \\
+        --model_id flux2_lora_v1 \\
+        --weights_path /path/to/lora/weights \\
+        --device cuda:1
+
 # ── heatmap ──────────────────────────────────────────────────────────
 # Batch mode – all pairs from the test set:
     uv run generate.py heatmap \\
+        --backend ip2p \\
         --test_set ./data_preparation/test_set.json \\
         --category hazelnut \\
-        --unet_path /path/to/checkpoint/unet \\
+        --weights_path /path/to/checkpoint/unet \\
         --device cuda:1
 
-# Quick test – single prompt, default image:
+# Quick test – single prompt, default image, FLUX.2 backend:
     uv run generate.py heatmap \\
+        --backend flux2 \\
         --prompt "add a crack" \\
         --category hazelnut \\
-        --unet_path /path/to/checkpoint/unet \\
+        --weights_path /path/to/lora/weights \\
         --device cuda:1
 
 # Disable the heatmap row:
     uv run generate.py heatmap \\
+        --backend ip2p \\
         --prompt "add a crack" \\
         --category hazelnut \\
-        --unet_path /path/to/checkpoint/unet \\
         --device cuda:1 \\
         --no-heatmap
 """
@@ -107,34 +133,34 @@ OUTPUT_BASE_PATH = "./output/"
 
 
 ###
-### Shared helpers
+### Backend registry
 ###
+#
+# To add a new model backend:
+#   1. Write a loader function:  def _load_<name>(weights_path, device) -> pipeline
+#   2. Register it:              BACKENDS["<name>"] = {"loader": _load_<name>, "description": "..."}
+#
+# The loader receives *weights_path* (str | None) and *device* (str).
+# It must return a pipeline object whose __call__ accepts (prompt=, image=).
+#
 
-def load_pipeline(unet_path, device):
-    """Load the InstructPix2Pix pipeline, optionally with a custom UNet.
 
-    If *unet_path* is None the vanilla (pre-trained) InstructPix2Pix model
-    is used.  Otherwise the UNet weights at *unet_path* are loaded and
-    injected into the base pipeline, keeping the original VAE and text
-    encoder.
-
-    The scheduler is always swapped to EulerAncestralDiscrete for better
-    InstructPix2Pix results.
+def _load_ip2p(weights_path, device):
+    """Load the InstructPix2Pix pipeline.
 
     Args:
-        unet_path: Path to a fine-tuned UNet directory, or None for the
-                   vanilla InstructPix2Pix baseline.
+        weights_path: Path to a fine-tuned UNet directory, or None for the
+                      vanilla InstructPix2Pix baseline.
         device: Torch device string (e.g. "cuda:1").
 
     Returns:
-        A ready-to-use StableDiffusionInstructPix2PixPipeline on *device*.
+        A ready-to-use StableDiffusionInstructPix2PixPipeline.
     """
     base_model_id = "timbrooks/instruct-pix2pix"
     dtype = torch.bfloat16
 
-    if unet_path is None:
-        # Vanilla baseline: load the full model as-is.
-        print("Loading vanilla InstructPix2Pix baseline...")
+    if weights_path is None:
+        print("[ip2p] Loading vanilla InstructPix2Pix baseline...")
         pipe = StableDiffusionInstructPix2PixPipeline.from_pretrained(
             base_model_id,
             torch_dtype=dtype,
@@ -142,13 +168,10 @@ def load_pipeline(unet_path, device):
             requires_safety_checker=False,
         )
     else:
-        # Fine-tuned model: load only the UNet from the checkpoint and
-        # plug it into the base pipeline (VAE + text encoder stay stock).
-        print(f"Loading custom UNet from {unet_path}...")
+        print(f"[ip2p] Loading custom UNet from {weights_path}...")
         trained_unet = UNet2DConditionModel.from_pretrained(
-            unet_path, torch_dtype=dtype,
+            weights_path, torch_dtype=dtype,
         )
-        print("Injecting UNet into base pipeline...")
         pipe = StableDiffusionInstructPix2PixPipeline.from_pretrained(
             base_model_id,
             unet=trained_unet,
@@ -157,8 +180,6 @@ def load_pipeline(unet_path, device):
             requires_safety_checker=False,
         )
 
-    # Swap the default scheduler for one that works better with
-    # InstructPix2Pix-style editing.
     pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(
         pipe.scheduler.config,
     )
@@ -166,15 +187,88 @@ def load_pipeline(unet_path, device):
     return pipe
 
 
+def _load_flux2(weights_path, device):
+    """Load the FLUX.2 Klein 4B pipeline.
+
+    Args:
+        weights_path: Path to a LoRA weights directory/safetensors file,
+                      or None for the vanilla FLUX.2 Klein baseline.
+        device: Torch device string (e.g. "cuda:1").
+
+    Returns:
+        A ready-to-use Flux2KleinPipeline.
+    """
+    from diffusers import Flux2KleinPipeline
+
+    base_model_id = "black-forest-labs/FLUX.2-klein-4B"
+    dtype = torch.bfloat16
+
+    print("[flux2] Loading base FLUX.2 Klein pipeline...")
+    pipe = Flux2KleinPipeline.from_pretrained(
+        base_model_id,
+        torch_dtype=dtype,
+    )
+
+    if weights_path is None:
+        print("[flux2] Using vanilla baseline (no LoRA).")
+    else:
+        print(f"[flux2] Injecting LoRA weights from {weights_path}...")
+        pipe.load_lora_weights(weights_path)
+        pipe.fuse_lora()
+
+    pipe.to(device)
+    return pipe
+
+
+# ── Registry ──────────────────────────────────────────────────────────
+# Each entry maps a backend name to its loader function and a short
+# human-readable description shown in --help.
+BACKENDS = {
+    "ip2p": {
+        "loader": _load_ip2p,
+        "description": "InstructPix2Pix  (--weights_path = UNet dir)",
+    },
+    "flux2": {
+        "loader": _load_flux2,
+        "description": "FLUX.2 Klein 4B  (--weights_path = LoRA dir)",
+    },
+}
+
+
+def load_pipeline(backend, weights_path, device):
+    """Load a diffusion pipeline by backend name.
+
+    Args:
+        backend: Key into the BACKENDS registry (e.g. "ip2p", "flux2").
+        weights_path: Backend-specific path to fine-tuned weights, or None
+                      for the vanilla baseline.
+        device: Torch device string.
+
+    Returns:
+        A ready-to-use pipeline.
+    """
+    if backend not in BACKENDS:
+        raise ValueError(
+            f"Unknown backend '{backend}'. "
+            f"Available: {list(BACKENDS.keys())}"
+        )
+    loader_fn = BACKENDS[backend]["loader"]
+    return loader_fn(weights_path, device)
+
+
+###
+### Shared helpers
+###
+
+
 def generate_image(pipe, image_path, prompt):
     """Generate a single edited image from an input image and a prompt.
 
     The input is resized to 512×512 before being passed to the pipeline.
-    Generation parameters (steps, guidance scales) are kept fixed for
-    reproducibility across runs.
+    Each backend uses its own default inference parameters.
 
     Args:
-        pipe: A loaded StableDiffusionInstructPix2PixPipeline.
+        pipe: A loaded pipeline (any backend).
         image_path: Path to the source image on disk.
         prompt: The editing instruction (e.g. "add a crack").
 
@@ -184,10 +278,7 @@ def generate_image(pipe, image_path, prompt):
     init_image = Image.open(image_path).convert("RGB").resize((512, 512))
     output = pipe(
         prompt=prompt,
-        image=init_image,
-        num_inference_steps=20,
-        image_guidance_scale=1.5,
-        guidance_scale=7.5,
+        image=init_image
     ).images[0]
     return output
 
@@ -364,7 +455,7 @@ def cmd_compare(args):
     print(f"Need to generate {len(to_generate)}/{len(inputs)} images.")
 
     # Load the (heavy) diffusion pipeline only when there is actual work.
-    pipe = load_pipeline(args.unet_path, args.device)
+    pipe = load_pipeline(args.backend, args.weights_path, args.device)
 
     output_dir = os.path.join(OUTPUT_BASE_PATH, args.model_id)
     os.makedirs(output_dir, exist_ok=True)
@@ -431,7 +522,7 @@ def cmd_heatmap(args):
     # Load the pipeline once and reuse it for every pair.  This is the
     # main advantage over the old tmp.py approach which spawned a new
     # process (and re-loaded the model) for each pair.
-    pipe = load_pipeline(args.unet_path, args.device)
+    pipe = load_pipeline(args.backend, args.weights_path, args.device)
 
     output_dir = args.output_dir
     os.makedirs(output_dir, exist_ok=True)
@@ -468,9 +559,30 @@ def cmd_heatmap(args):
 ### CLI
 ###
 
+def _add_common_args(parser):
+    """Add arguments shared by all subcommands (backend, weights, device)."""
+    backends_help = ", ".join(
+        f"{name} ({info['description']})" for name, info in BACKENDS.items()
+    )
+    parser.add_argument(
+        "--backend", type=str, required=True,
+        choices=list(BACKENDS.keys()),
+        help=f"Model backend to use. Available: {backends_help}",
+    )
+    parser.add_argument(
+        "--weights_path", type=str, default=None,
+        help="Path to fine-tuned weights (UNet dir for ip2p, LoRA dir for "
+             "flux2). Omit for the vanilla baseline.",
+    )
+    parser.add_argument(
+        "--device", type=str, required=True,
+        help="CUDA device (e.g. cuda:1)",
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate images with InstructPix2Pix.",
+        description="Generate images with multiple model backends.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -479,6 +591,7 @@ def main():
         "compare",
         help="Generate images for model comparison (incremental).",
     )
+    _add_common_args(p_cmp)
     p_cmp.add_argument("--test_set", type=str, required=True,
                        help="Path to test_set.json")
     p_cmp.add_argument("--results", type=str, default="results.json",
@@ -487,10 +600,6 @@ def main():
                        help="Object category (e.g. hazelnut, pill)")
     p_cmp.add_argument("--model_id", type=str, required=True,
                        help="Name for this model run")
-    p_cmp.add_argument("--unet_path", type=str, default=None,
-                       help="Path to fine-tuned UNet dir (omit for vanilla)")
-    p_cmp.add_argument("--device", type=str, required=True,
-                       help="CUDA device (e.g. cuda:1)")
     p_cmp.set_defaults(func=cmd_compare)
 
     # ── heatmap ───────────────────────────────────────────────────────
@@ -498,6 +607,7 @@ def main():
         "heatmap",
         help="Generate images + optional heatmap grid.",
     )
+    _add_common_args(p_heat)
     mode = p_heat.add_mutually_exclusive_group(required=True)
     mode.add_argument("--test_set", type=str,
                       help="Path to test_set.json (batch mode)")
@@ -506,10 +616,6 @@ def main():
 
     p_heat.add_argument("--category", type=str, required=True,
                         help="Object category (e.g. hazelnut, pill)")
-    p_heat.add_argument("--unet_path", type=str, required=True,
-                        help="Path to fine-tuned UNet dir")
-    p_heat.add_argument("--device", type=str, required=True,
-                        help="CUDA device (e.g. cuda:1)")
     p_heat.add_argument("--output_dir", type=str,
                         default="./output_heatmap/",
                         help="Output directory (default: ./output_heatmap/)")
