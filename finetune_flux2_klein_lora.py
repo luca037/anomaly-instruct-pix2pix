@@ -282,6 +282,8 @@ def parse_args():
 
     # -- Hardware --
     parser.add_argument("--allow_tf32", action="store_true")
+    parser.add_argument("--torch_compile", action="store_true",
+                        help="Compile the transformer with torch.compile for faster training.")
     parser.add_argument(
         "--mixed_precision", type=str, default=None,
         choices=["no", "fp16", "bf16"],
@@ -749,6 +751,13 @@ def main():
         num_warmup_steps=args.lr_warmup_steps * accelerator.num_processes,
         num_training_steps=args.max_train_steps * accelerator.num_processes,
     )
+
+    # ------------------------------------------------------------------
+    # torch.compile (optional)
+    # ------------------------------------------------------------------
+    if args.torch_compile:
+        logger.info("Compiling transformer with torch.compile (mode='default')...")
+        transformer = torch.compile(transformer, mode="default")
 
     transformer, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         transformer, optimizer, train_dataloader, lr_scheduler
