@@ -1,0 +1,27 @@
+CUDA_VISIBLE_DEVICES=2 accelerate launch finetune_flux2_klein_lora.py \
+       --pretrained_model_name_or_path="black-forest-labs/FLUX.2-klein-4B" \
+       --train_data_dir="/home/luca_piai/big_disk/datasets/train_set/" \
+       --output_dir="/home/luca_piai/big_disk/flux2_klein_lora_output/" \
+       --original_image_column="original_image" \
+       --edited_image_column="edited_image" \
+       --edit_prompt_column="edit_prompt" \
+       --dataloader_num_workers=16 \
+       --resolution=512 \
+       --train_batch_size=8 \
+       --gradient_accumulation_steps=2 \
+       --gradient_checkpointing \
+       --learning_rate=1e-4 \
+       --random_flip \
+       --rank=16 \
+       --lora_alpha=16 \
+       --max_train_steps=1200 \
+       --checkpointing_steps=100 \
+       --mixed_precision="bf16" \
+       --allow_tf32 \
+       --report_to="wandb" \
+       --val_image_url="/home/luca_piai/big_disk/datasets/my_dataset/hazelnut_good_000.png" \
+       --validation_prompt="add a crack to the surface of the hazelnut" \
+       --num_validation_images=2 \
+       --validation_epochs=5 \
+       --guidance_scale=1.0 \
+       --seed=42
