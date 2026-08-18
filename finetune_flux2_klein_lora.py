@@ -539,10 +539,11 @@ def main():
         if accelerator.is_main_process:
             transformer_lora_layers_to_save = None
             for model in models:
-                if isinstance(unwrap_model(model), type(unwrap_model(transformer))):
-                    transformer_lora_layers_to_save = get_peft_model_state_dict(model)
+                unwrapped = unwrap_model(model)
+                if isinstance(unwrapped, type(unwrap_model(transformer))):
+                    transformer_lora_layers_to_save = get_peft_model_state_dict(unwrapped)
                 else:
-                    raise ValueError(f"Unexpected save model: {model.__class__}")
+                    raise ValueError(f"Unexpected save model: {unwrapped.__class__}")
 
             Flux2KleinPipeline.save_lora_weights(
                 output_dir,
@@ -556,10 +557,12 @@ def main():
         transformer_model = None
         while len(models) > 0:
             model = models.pop()
-            if isinstance(model, type(unwrap_model(transformer))):
-                transformer_model = model
+            unwrapped = unwrap_model(model)
+            
+            if isinstance(unwrapped, type(unwrap_model(transformer))):
+                transformer_model = unwrapped
             else:
-                raise ValueError(f"Unexpected load model: {model.__class__}")
+                raise ValueError(f"Unexpected load model: {unwrapped.__class__}")
 
         lora_state_dict = Flux2KleinPipeline.lora_state_dict(input_dir)
         transformer_state_dict = {
