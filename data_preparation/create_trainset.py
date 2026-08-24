@@ -18,7 +18,7 @@ TRAINSET_PATH = "/home/luca_piai/big_disk/datasets/train_set/"
 
 # Specify the categories to include in the training set
 # Set to [] to include all or [None] to skip
-MVTEC_CATEGORIES = []
+MVTEC_CATEGORIES = ["cable", "hazelnut", "leather", "pill", "screw", "tile", "transistor"]
 VISA_CATEGORIES = [None]
 
 # Set csv urls
@@ -113,9 +113,9 @@ def clean_cable_defect_prompt(mvtec_csv):
 
 def main():
     parser = argparse.ArgumentParser(description="Create train set.")
-    parser.add_argument('--download', action='store_true', help="Download mvtec csv and visa csv from MIRAGE dataset.")
-    parser.add_argument('--mvtec_perc', type=float, default=1.0, help="How many samples are retained (1.0 means all, 0.5 means half discarted).")
-    parser.add_argument('--visa_perc', type=float, default=1.0, help="How many samples are retained (1.0 means all, 0.5 means half discarted).")
+    parser.add_argument('--download', action='store_true', help="Download mvtec csv file and visa csv file from MIRAGE dataset repository.")
+    parser.add_argument('--mvtec_perc', type=float, default=1.0, help="How many samples are retained (1.0 means all, 0.5 means half discarded).")
+    parser.add_argument('--visa_perc', type=float, default=1.0, help="How many samples are retained (1.0 means all, 0.5 means half discarded).")
     args = parser.parse_args()
 
     # Download the two csv files
@@ -125,7 +125,6 @@ def main():
         print("Cleaning MVTEC cable prompt...")
         clean_cable_defect_prompt(MVTEC_CSV)
     
-    # Clip percentages
     assert 0.0 <= args.mvtec_perc <= 1.0, "mvtec_perc must be between 0.0 and 1.0"
     assert 0.0 <= args.visa_perc <= 1.0, "visa_perc must be between 0.0 and 1.0"
     

@@ -15,10 +15,15 @@ PROMPTS = {
         "add a crack to the surface of the hazelnut",
         "add dark rot spots to the hazelnut",
         "add burned surface spots to the hazelnut",
-        "crushed hull",
+        "an hazelnut with a crushed hull",
         "add surface abrasions",
         "add surface mold",
-        "add blue dots"
+        "add blue dots on the surface of the hazelnut",
+        "the hazelnut has a damaged basal scar",
+        "the shape of the hazelnut is irregular and deformed",
+        "add rodent gnawing damage to the hazelnut",
+        "the hazelnut has a discolored surface",
+        "write HELLO on the surface of the hazelnut"
 
         #"add a deep scratch to the hazelnut",
         #"add a dark liquid stain to the hazelnut",
@@ -29,11 +34,17 @@ PROMPTS = {
         "a pill with a chipped edge",
         "add a fracture to the surface of the pill",
         "a pill with a swollen, bloated shape",
-        "a pill with an eroded surface",
-
+        "the surface of the pill looks eroded and worn",
+        "moisture spotting on the surface of the pill",
+        "add an embedded contaminant to the pill",
+        "the pill has a chipped edge",
+        "the imprint on the pill is eroded and illegible",
+        "the surface of the pill is pitted",
+        "the imprint is wrong repaced with a different one (GG)",
+        "add a hole to the surface of the pill",
+        "add blue dots to the surface of the pill"
         #"add a small hole to the pill",
         #"add a dirty smudge to the pill",
-        #"add blue dots to the surface of the pill",
         #"a pill with a burned surface with black spots"
     ],
     "screw": [
@@ -45,11 +56,8 @@ PROMPTS = {
         "burred head rim",
         "gouged smooth shank",
         "peeling plating",
-
-        #"a screw with a burred head rim",
-        #"a screw with a bent shaft",
-        #"add a scraped groove to the screw head",
-        #"add a stripped area to the screw thread"
+        "thread galling",
+        "stripped drive recess"
     ],
     "cable" : [
         "a cable with a melted insulation",
