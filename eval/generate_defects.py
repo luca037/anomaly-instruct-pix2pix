@@ -31,7 +31,6 @@ import argparse
 import json
 import os
 import sys
-from itertools import cycle
 
 import cv2
 import numpy as np
@@ -145,15 +144,38 @@ def main():
             if not args.no_mask:
                 os.makedirs(mask_dir, exist_ok=True)
 
+            # Resume support: if images were already generated for this
+            # <object>/<defect_type>, continue from the index right after the
+            # highest existing one instead of overwriting. This lets an
+            # interrupted run pick up where it left off (total target stays
+            # ``args.num_images``).
+            existing_idx = [
+                int(os.path.splitext(f)[0])
+                for f in os.listdir(out_dir)
+                if f.lower().endswith(IMAGE_EXTS)
+                and os.path.isfile(os.path.join(out_dir, f))
+                and os.path.splitext(f)[0].isdigit()
+            ]
+            start_idx = (max(existing_idx) + 1) if existing_idx else 0
+            n_new = max(0, args.num_images - start_idx)
+
             print(f"[{object_name}/{defect_type}] prompt={prompt}")
-            print(f"  -> {args.num_images} images into {out_dir}")
-            clean_cycle = cycle(clean_images)
+            if start_idx > 0:
+                print(
+                    f"  resuming from index {start_idx} "
+                    f"({n_new} new image(s) to reach {args.num_images})"
+                )
+            print(f"  -> {n_new} new image(s) into {out_dir}")
 
             for i in tqdm(
-                range(args.num_images), desc=f"{object_name}/{defect_type}", leave=False
+                range(start_idx, args.num_images),
+                desc=f"{object_name}/{defect_type}",
+                leave=False,
             ):
-                clean_path = next(clean_cycle)
-                generated = generate_image(pipe, clean_path, prompt)
+                # Map each index to the same clean source a fresh run would use,
+                # so resuming keeps the input->output pairing deterministic.
+                clean_path = clean_images[i % len(clean_images)]
+                generated = generate_image(pipe, clean_path, prompt, 20)
                 gen_path = os.path.join(out_dir, f"{i:03d}.png")
                 generated.save(gen_path)
 
@@ -161,7 +183,7 @@ def main():
                     mask = compute_defect_mask(clean_path, generated)
                     mask.save(os.path.join(mask_dir, f"{i:03d}_mask.png"))
 
-            print(f"  saved {args.num_images} images to {out_dir}")
+            print(f"  saved {n_new} new image(s) to {out_dir}")
 
 
 if __name__ == "__main__":
