@@ -261,7 +261,7 @@ def load_pipeline(backend, weights_path, device):
 ###
 
 
-def generate_image(pipe, image_path, prompt):
+def generate_image(pipe, image_path, prompt, steps):
     """Generate a single edited image from an input image and a prompt.
 
     The input is resized to 512×512 before being passed to the pipeline.
@@ -271,14 +271,15 @@ def generate_image(pipe, image_path, prompt):
         pipe: A loaded pipeline (any backend).
         image_path: Path to the source image on disk.
         prompt: The editing instruction (e.g. "add a crack").
-
+        steps: The number of inference steps to use.
     Returns:
         A PIL Image with the edited result.
     """
     init_image = Image.open(image_path).convert("RGB").resize((512, 512))
     output = pipe(
         prompt=prompt,
-        image=init_image
+        image=init_image,
+        num_inference_steps=steps,
     ).images[0]
     return output
 
@@ -466,7 +467,7 @@ def cmd_compare(args):
         file_name = f"{args.category}_{i:03d}.png"
         save_path = os.path.join(os.path.abspath(output_dir), file_name)
 
-        output_image = generate_image(pipe, inputs[i], prompts[i])
+        output_image = generate_image(pipe, inputs[i], prompts[i], args.steps)
         output_image.save(save_path)
         model_outputs[i] = save_path
 
@@ -535,7 +536,7 @@ def cmd_heatmap(args):
 
         # Generate N variant images for this (input, prompt) pair.
         for i in range(args.num_images):
-            output_image = generate_image(pipe, input_path, prompt)
+            output_image = generate_image(pipe, input_path, prompt, args.steps)
             out_name = f"{args.category}_{tag}_{pair_idx}_{i}.png"
             out_path = os.path.join(output_dir, out_name)
             output_image.save(out_path)
@@ -598,6 +599,8 @@ def main():
                        help="Path to results.json (default: results.json)")
     p_cmp.add_argument("--category", type=str, required=True,
                        help="Object category (e.g. hazelnut, pill)")
+    p_cmp.add_argument("--steps", type=int, default=20,
+                        help="Number of inference steps (default: 20)")
     p_cmp.add_argument("--model_id", type=str, required=True,
                        help="Name for this model run")
     p_cmp.set_defaults(func=cmd_compare)
@@ -621,6 +624,8 @@ def main():
                         help="Output directory (default: ./output_heatmap/)")
     p_heat.add_argument("--num_images", type=int, default=3,
                         help="Images to generate per prompt (default: 3)")
+    p_heat.add_argument("--steps", type=int, default=20,
+                        help="Number of inference steps (default: 20)")
     p_heat.add_argument("--heatmap", action="store_true", default=True,
                         help="Enable heatmap row (default: on)")
     p_heat.add_argument("--no-heatmap", action="store_false", dest="heatmap",
