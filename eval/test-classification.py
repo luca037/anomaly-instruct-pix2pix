@@ -23,6 +23,7 @@ import os
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+import torchvision
 from torchvision.models import resnet34
 from unet_utils.data_loader import MVTec_classification_test, MVTec_classification_train
 
@@ -93,7 +94,7 @@ def test_on_device(obj_names, args):
         class_num = train_dataset.class_num()
         anomaly_names = train_dataset.return_anomaly_names()
 
-        model = resnet34(pretrained=True, progress=True)
+        model = resnet34(weights=torchvision.models.ResNet34_Weights.DEFAULT, progress=True)
         model.fc = nn.Linear(model.fc.in_features, class_num)
         model = model.to(args.device)
         model.load_state_dict(
