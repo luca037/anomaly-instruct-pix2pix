@@ -254,6 +254,15 @@ def evaluate_object(args, obj_name, anomaly_names, all_test_names, ckpt_path):
             f"pxAP={m['pixel_AP']:.3f} pxF1={m['pixel_F1']:.3f} "
             f"pxPRO={m['pixel_AUPRO']:.3f}"
         )
+    if rows:
+        avg_px_auroc = float(np.mean([r["pixel_AUROC"] for r in rows]))
+        avg_px_ap = float(np.mean([r["pixel_AP"] for r in rows]))
+        avg_px_f1 = float(np.mean([r["pixel_F1"] for r in rows]))
+        avg_px_pro = float(np.mean([r["pixel_AUPRO"] for r in rows]))
+        print(
+            f"    [pixel-avg] AUROC={avg_px_auroc:.3f} AP={avg_px_ap:.3f} "
+            f"F1={avg_px_f1:.3f} PRO={avg_px_pro:.3f}"
+        )
     i_auroc, i_ap, i_f1 = _image_level_metrics(grouped_gts, grouped_preds)
     print(
         f"    [image-level] AUROC={i_auroc:.3f} AP={i_ap:.3f} F1={i_f1:.3f}"
