@@ -31,11 +31,19 @@ CATEGORIES = ["cable", "screw", "transistor", "leather", "hazelnut", "pill", "ti
 
 
 def test(args, obj_name, model, anomaly_names):
-    """Evaluate loss + accuracy on the real MVTec test split for one object."""
+    """Evaluate loss + accuracy on the real MVTec test split for one object.
+
+    Reports overall accuracy plus per-defect (per-class) accuracy over the
+    validation (real MVTec) set.
+    """
     model.eval()
     dataset = MVTec_classification_test(args, obj_name, anomaly_names)
     dataloader = DataLoader(dataset, batch_size=100, shuffle=False, num_workers=0)
     criterion = nn.CrossEntropyLoss()
+
+    num_classes = len(anomaly_names)
+    per_correct = [0] * num_classes
+    per_total = [0] * num_classes
 
     correct = 0
     total = 0
@@ -49,10 +57,21 @@ def test(args, obj_name, model, anomaly_names):
             prediction = torch.argmax(y_pred, 1)
             correct += (prediction == label).sum().item()
             total += label.size(0)
+            for lbl, pred in zip(label.tolist(), prediction.tolist()):
+                per_total[lbl] += 1
+                if lbl == pred:
+                    per_correct[lbl] += 1
     acc = correct / total if total > 0 else 0.0
     val_loss = loss_sum / total if total > 0 else 0.0
     print(f"  val loss: {val_loss:.4f}  Accuracy: {acc:.4f} ({correct}/{total})")
-    return acc, val_loss
+    per_defect = {}
+    for i, name in enumerate(anomaly_names):
+        c = per_correct[i]
+        t = per_total[i]
+        acc_c = c / t if t > 0 else 0.0
+        per_defect[name] = (acc_c, c, t)
+        print(f"    {name:12s}: {acc_c:.4f} ({c}/{t})")
+    return acc, val_loss, per_defect
 
 
 def eval_train_set(args, obj_name, model):
@@ -94,20 +113,23 @@ def test_on_device(obj_names, args):
         class_num = train_dataset.class_num()
         anomaly_names = train_dataset.return_anomaly_names()
 
-        model = resnet34(weights=torchvision.models.ResNet34_Weights.DEFAULT, progress=True)
+        model = resnet34(
+            weights=torchvision.models.ResNet34_Weights.DEFAULT, progress=True
+        )
         model.fc = nn.Linear(model.fc.in_features, class_num)
         model = model.to(args.device)
         model.load_state_dict(
             torch.load(os.path.join(args.checkpoint_path, run_name + ".pckl"))
         )
 
-        train_loss, train_acc = eval_train_set(args, obj_name, model)
-        acc, val_loss = test(args, obj_name, model, anomaly_names)
+        train_loss, train_acc = 0, 0#eval_train_set(args, obj_name, model)
+        acc, val_loss, per_defect = test(args, obj_name, model, anomaly_names)
         results[obj_name] = {
             "train_loss": train_loss,
             "train_acc": train_acc,
             "val_loss": val_loss,
             "val_acc": acc,
+            "per_defect": per_defect,
         }
 
     print("\nClassification summary per object:")
