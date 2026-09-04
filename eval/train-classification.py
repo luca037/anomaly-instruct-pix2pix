@@ -36,7 +36,10 @@ import torchvision
 from torchvision.models import resnet34
 from unet_utils.data_loader import MVTec_classification_test, MVTec_classification_train
 
-CATEGORIES = ["cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile", "carpet", "capsule", "wood", "metal_nut"]
+CATEGORIES = [  # noqa: E501
+    "cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile",
+    "carpet", "capsule", "wood", "metal_nut",
+]
 
 
 def test(args, obj_name, model, anomaly_names):
@@ -96,7 +99,9 @@ def train_on_device(obj_names, args):
         anomaly_names = dataset.return_anomaly_names()
         print(f"  classes ({class_num}): {anomaly_names}")
 
-        model = resnet34(weights=torchvision.models.ResNet34_Weights.DEFAULT, progress=True)
+        model = resnet34(
+            weights=torchvision.models.ResNet34_Weights.DEFAULT, progress=True
+        )
         model.fc = nn.Linear(model.fc.in_features, class_num)
         model = model.to(args.device)
 
@@ -165,6 +170,13 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument(
+        "--clip_bad_json",
+        type=str,
+        default=None,
+        help="Optional path to clip_bad.json (from eval/clip_filter.py); "
+        "images listed as BAD are excluded from the synthetic train set.",
+    )
     args = parser.parse_args()
 
     train_on_device(args.categories, args)

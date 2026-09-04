@@ -42,7 +42,10 @@ from unet_utils.data_loader import (
 from unet_utils.loss import FocalLoss, SSIMLoss
 from unet_utils.model_unet import DiscriminativeSubNetwork
 
-CATEGORIES = ["cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile", "carpet", "capsule", "wood", "metal_nut"]
+CATEGORIES = [  # noqa: E501
+    "cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile",
+    "carpet", "capsule", "wood", "metal_nut",
+]
 
 def _object_defect_types(args, obj_name):
     """Discover defect-type names from the generated ``test/`` folder."""
@@ -182,6 +185,13 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument(
+        "--clip_bad_json",
+        type=str,
+        default=None,
+        help="Optional path to clip_bad.json (from eval/clip_filter.py); "
+        "synthetic images listed as BAD are excluded from training.",
+    )
     args = parser.parse_args()
 
     train_on_device(args.categories, args)

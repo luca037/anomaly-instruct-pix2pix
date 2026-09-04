@@ -35,6 +35,7 @@ Normal masks are all-zeros. The eval set reads the real MVTec ``test`` +
 but without `cv2`/`imgaug` (not installed here).
      """
 
+import json
 import os
 import random
 
@@ -78,11 +79,23 @@ class MVTec_classification_train(Dataset):
             for d in os.listdir(self.root_dir)
             if os.path.isdir(os.path.join(self.root_dir, d))
         ]
+        # Optional CLIP filtering: if --clip_bad_json is given, skip indices
+        # listed as bad for this object/defect in that JSON.
+        clip_bad = {}
+        clip_path = getattr(args, "clip_bad_json", None)
+        if clip_path and os.path.isfile(clip_path):
+            with open(clip_path, "r") as f:
+                clip_bad = json.load(f)
+
         self.img_paths = []
         self.labels = []
         for idx, anomaly in enumerate(self.anomaly_names):
             defect_dir = os.path.join(self.root_dir, anomaly)
+            bad_set = set(clip_bad.get(f"{sample_name}/{anomaly}", []))
             for fname in _sorted_image_files(defect_dir):
+                base = os.path.splitext(fname)[0]
+                if base in bad_set:
+                    continue
                 self.img_paths.append(os.path.join(defect_dir, fname))
                 self.labels.append(idx)
 
@@ -213,6 +226,13 @@ class AnomalyLocalizationTrainDataset(Dataset):
         self.mvtec_test_root = os.path.join(self.mvtec_root, "test")
         self.mvtec_gt_root = os.path.join(self.mvtec_root, "ground_truth")
 
+        # Optional CLIP filtering for the synthetic branch.
+        clip_bad = {}
+        clip_path = getattr(args, "clip_bad_json", None)
+        if clip_path and os.path.isfile(clip_path):
+            with open(clip_path, "r") as f:
+                clip_bad = json.load(f)
+
         # Generated (synthetic) defect folders -> (img_paths, mask_paths) per defect.
         self.gen_img_paths = []
         self.gen_mask_paths = []
@@ -222,9 +242,12 @@ class AnomalyLocalizationTrainDataset(Dataset):
                 mask_dir = os.path.join(self.gt_root, defect_type)
                 if not os.path.isdir(img_dir):
                     continue
+                bad_set = set(clip_bad.get(f"{sample_name}/{defect_type}", []))
                 imgs, masks = [], []
                 for fname in _sorted_image_files(img_dir):
                     base = os.path.splitext(fname)[0]
+                    if base in bad_set:
+                        continue
                     mask_path = os.path.join(mask_dir, f"{base}_mask.png")
                     if not os.path.isfile(mask_path):
                         mask_path = os.path.join(img_dir, f"{base}_mask.png")

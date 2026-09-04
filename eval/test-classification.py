@@ -27,7 +27,10 @@ import torchvision
 from torchvision.models import resnet34
 from unet_utils.data_loader import MVTec_classification_test, MVTec_classification_train
 
-CATEGORIES = ["cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile", "carpet", "capsule", "wood", "metal_nut"]
+CATEGORIES = [  # noqa: E501
+    "cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile",
+    "carpet", "capsule", "wood", "metal_nut",
+]
 
 
 def test(args, obj_name, model, anomaly_names):
@@ -160,6 +163,13 @@ def main():
     )
     parser.add_argument("--categories", type=str, nargs="+", default=CATEGORIES)
     parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument(
+        "--clip_bad_json",
+        type=str,
+        default=None,
+        help="Optional path to clip_bad.json; if given, the generated train "
+        "set accuracy (eval_train_set) skips BAD images.",
+    )
     args = parser.parse_args()
 
     test_on_device(args.categories, args)
