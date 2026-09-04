@@ -51,7 +51,7 @@ parser.add_argument(
     "--categories",
     type=str,
     nargs="+",
-    default=["cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile", "carpet", "capsule", "wood"],
+    default=["cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile", "carpet", "capsule", "wood", "metal_nut"],
     help="MVTec categories to evaluate",
 )
 parser.add_argument(

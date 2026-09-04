@@ -40,7 +40,7 @@ from torch.utils.data import DataLoader
 from unet_utils.au_pro_util import calculate_aupro
 from unet_utils.data_loader import AnomalyLocalizationTestDataset
 
-CATEGORIES = ["cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile", "carpet", "capsule", "wood"]
+CATEGORIES = ["cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile", "carpet", "capsule", "wood", "metal_nut"]
 
 
 def _eval_defect_names(args, obj_name):

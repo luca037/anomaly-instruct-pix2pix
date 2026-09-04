@@ -27,7 +27,7 @@ import torchvision
 from torchvision.models import resnet34
 from unet_utils.data_loader import MVTec_classification_test, MVTec_classification_train
 
-CATEGORIES = ["cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile", "carpet", "capsule", "wood"]
+CATEGORIES = ["cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile", "carpet", "capsule", "wood", "metal_nut"]
 
 
 def test(args, obj_name, model, anomaly_names):
@@ -122,7 +122,7 @@ def test_on_device(obj_names, args):
             torch.load(os.path.join(args.checkpoint_path, run_name + ".pckl"))
         )
 
-        train_loss, train_acc = 0, 0#eval_train_set(args, obj_name, model)
+        train_loss, train_acc = eval_train_set(args, obj_name, model)
         acc, val_loss, per_defect = test(args, obj_name, model, anomaly_names)
         results[obj_name] = {
             "train_loss": train_loss,

@@ -36,7 +36,7 @@ import torchvision
 from torchvision.models import resnet34
 from unet_utils.data_loader import MVTec_classification_test, MVTec_classification_train
 
-CATEGORIES = ["cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile", "carpet", "capsule", "wood"]
+CATEGORIES = ["cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile", "carpet", "capsule", "wood", "metal_nut"]
 
 
 def test(args, obj_name, model, anomaly_names):
