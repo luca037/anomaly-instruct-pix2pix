@@ -42,7 +42,7 @@ from unet_utils.data_loader import (
 from unet_utils.loss import FocalLoss, SSIMLoss
 from unet_utils.model_unet import DiscriminativeSubNetwork
 
-CATEGORIES = ["cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile"]
+CATEGORIES = ["cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile", "carpet", "capsule", "wood"]
 
 
 def _object_defect_types(args, obj_name):

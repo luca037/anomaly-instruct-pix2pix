@@ -51,7 +51,7 @@ parser.add_argument(
     "--categories",
     type=str,
     nargs="+",
-    default=["cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile"],
+    default=["cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile", "carpet", "capsule", "wood"],
     help="MVTec categories to evaluate",
 )
 parser.add_argument(
@@ -73,7 +73,7 @@ parser.add_argument(
 args = parser.parse_args()
 
 logging.basicConfig(
-    filename=f"{args.generated_path}_kid_score_log.txt",
+    filename=f"{args.generated_path}/kid_score_log.txt",
     level=logging.INFO,
     format="%(asctime)s - %(message)s",
 )
