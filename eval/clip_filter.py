@@ -7,7 +7,7 @@ image with its clean MVTec source, and runs OpenCLIP to decide whether the
 anomaly was actually rendered. Bad indices are collected in a single JSON
 file:
 
-    <generated_data_path>/clip_bad.json
+    <generated_path>/clip_bad.json
     {
         "hazelnut/crack": ["001", "005"],
         "hazelnut/cut": ["003"]
@@ -19,13 +19,13 @@ masks are moved or copied.
 Run filtering:
     uv run eval/clip_filter.py \
         --device cuda:1 \
-        --generated_data_path /home/luca_piai/big_disk/datasets/generated \
+        --generated_path /home/luca_piai/big_disk/datasets/generated \
         --mvtec_path /home/luca_piai/big_disk/datasets/mvtec \
         --input_json eval/defect_prompts.json
 
 Run overview (no CLIP needed):
     uv run eval/clip_filter.py --overview \
-        --generated_data_path /home/luca_piai/big_disk/datasets/generated
+        --generated_path /home/luca_piai/big_disk/datasets/generated
 """
 
 import argparse
@@ -62,7 +62,7 @@ def parse_args():
     )
     parser.add_argument("--device", type=str, default="cuda:1", help="e.g. cuda:1")
     parser.add_argument(
-        "--generated_data_path",
+        "--generated_path",
         type=str,
         required=True,
         help="Root of the generated dataset (output of generate_defects.py).",
@@ -83,7 +83,7 @@ def parse_args():
         "--output_json",
         type=str,
         default=None,
-        help="Output bad-index JSON. Defaults to <generated_data_path>/clip_bad.json.",
+        help="Output bad-index JSON. Defaults to <generated_path>/clip_bad.json.",
     )
     parser.add_argument(
         "--model", type=str, default=DEFAULT_MODEL, help="OpenCLIP model name."
@@ -217,7 +217,7 @@ def list_generated_indices(test_dir):
 def run_overview(args):
     """Print a per-object, per-defect summary of the bad-index JSON."""
     if args.output_json is None:
-        args.output_json = os.path.join(args.generated_data_path, "clip_bad.json")
+        args.output_json = os.path.join(args.generated_path, "clip_bad.json")
 
     bad = {}
     if os.path.isfile(args.output_json):
@@ -228,7 +228,7 @@ def run_overview(args):
     grand_bad = 0
     grand_total = 0
     for obj_name in args.categories:
-        obj_gen_root = os.path.join(args.generated_data_path, obj_name, "test")
+        obj_gen_root = os.path.join(args.generated_path, obj_name, "test")
         if not os.path.isdir(obj_gen_root):
             continue
 
@@ -269,7 +269,7 @@ def run_overview(args):
 def main():
     args = parse_args()
     if args.output_json is None:
-        args.output_json = os.path.join(args.generated_data_path, "clip_bad.json")
+        args.output_json = os.path.join(args.generated_path, "clip_bad.json")
 
     if args.overview:
         run_overview(args)
@@ -296,8 +296,8 @@ def main():
         if args.categories
         else sorted(
             d
-            for d in os.listdir(args.generated_data_path)
-            if os.path.isdir(os.path.join(args.generated_data_path, d))
+            for d in os.listdir(args.generated_path)
+            if os.path.isdir(os.path.join(args.generated_path, d))
         )
     )
 
@@ -307,7 +307,7 @@ def main():
             continue
 
         obj_prompts = prompts[obj_name]
-        obj_gen_root = os.path.join(args.generated_data_path, obj_name, "test")
+        obj_gen_root = os.path.join(args.generated_path, obj_name, "test")
         if not os.path.isdir(obj_gen_root):
             print(f"[skip] {obj_name}: no generated test/ dir")
             continue

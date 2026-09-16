@@ -46,7 +46,11 @@ if _REPO_ROOT not in sys.path:
 
 from generate import _load_ip2p, generate_image  # noqa: E402
 
-IMAGE_EXTS = (".png", ".jpg", ".jpeg")
+try:
+    from common import IMAGE_EXTS
+except ImportError:
+    IMAGE_EXTS = (".png", ".jpg", ".jpeg")
+
 MVTEC_ROOT = "/home/luca_piai/big_disk/datasets/mvtec"
 
 
@@ -80,7 +84,7 @@ def parse_args():
         help="Number of images to generate per defect type.",
     )
     parser.add_argument(
-        "--batch_size",
+        "--bs",
         type=int,
         default=4,
         help="Number of images generated per pipeline call (batched inference). "
@@ -136,13 +140,43 @@ def compute_defect_mask(input_path, generated_pil):
     return Image.fromarray(mask, mode="L")
 
 
-def _apply_torch_compile(pipe):
-    """Compile the heavy pipeline components with ``torch.compile``.
+def _resume_start(out_dir, num_images):
+    """Return ``(start_idx, n_new)`` so a re-run continues after the highest existing index."""
+    existing_idx = [
+        int(os.path.splitext(f)[0])
+        for f in os.listdir(out_dir)
+        if f.lower().endswith(IMAGE_EXTS)
+        and os.path.isfile(os.path.join(out_dir, f))
+        and os.path.splitext(f)[0].isdigit()
+    ]
+    start_idx = (max(existing_idx) + 1) if existing_idx else 0
+    n_new = max(0, num_images - start_idx)
+    return start_idx, n_new
 
-    Compiling speeds up repeated inference (the first call pays the multi-second
-    compile cost). Each component is wrapped defensively so a failure on one
-    (e.g. an unsupported op) doesn't abort the whole run.
-    """
+
+def _generate_one_defect(pipe, prompt_embeds, neg_embeds, clean_images, out_dir, mask_dir, indices, batch_size, no_mask):
+    """Run the pipeline in batches for one <object>/<defect> and write images/masks."""
+    for b_start in tqdm(range(0, len(indices), batch_size), desc=os.path.basename(out_dir), leave=False):
+        batch_idx = indices[b_start : b_start + batch_size]
+        B = len(batch_idx)
+        clean_paths = [clean_images[i % len(clean_images)] for i in batch_idx]
+        batch_pils = [Image.open(p).convert("RGB").resize((512, 512)) for p in clean_paths]
+        out = pipe(
+            prompt_embeds=prompt_embeds.repeat(B, 1, 1),
+            negative_prompt_embeds=neg_embeds.repeat(B, 1, 1),
+            image=batch_pils,
+            num_inference_steps=20,
+        ).images
+        for j, i in enumerate(batch_idx):
+            generated = out[j]
+            generated.save(os.path.join(out_dir, f"{i:03d}.png"))
+            if not no_mask:
+                mask = compute_defect_mask(clean_paths[j], generated)
+                mask.save(os.path.join(mask_dir, f"{i:03d}_mask.png"))
+
+
+def _apply_torch_compile(pipe):
+    """Compile the heavy pipeline components with ``torch.compile``."""
     for comp_name in ("unet", "vae"):
         comp = getattr(pipe, comp_name, None)
         if comp is None:
@@ -151,20 +185,12 @@ def _apply_torch_compile(pipe):
             setattr(pipe, comp_name, torch.compile(comp, mode="default"))
             print(f"[compile] torch.compile applied to pipe.{comp_name}")
         except Exception as e:  # pragma: no cover - environment dependent
-            print(
-                f"[compile] WARNING: could not compile pipe.{comp_name}: {e}. "
-                f"Continuing without it."
-            )
+            print(f"[compile] WARNING: could not compile pipe.{comp_name}: {e}. Continuing without it.")
     return pipe
 
 
 def _warmup(pipe, args, prompts):
-    """Run one throwaway generation so torch.compile triggers (and any errors
-    surface) *before* the timed generation loop.
-
-    Picks the first object that has clean images and its first defect prompt.
-    The result is discarded; nothing is written to disk.
-    """
+    """Run one throwaway generation so torch.compile triggers before the timed loop."""
     for object_name, defects in prompts.items():
         clean_images = list_clean_images(args.mvtec_path, object_name)
         if not clean_images:
@@ -181,7 +207,6 @@ def _warmup(pipe, args, prompts):
 def main():
     args = parse_args()
 
-    # Free convolution/matmul throughput wins (no accuracy impact at bf16).
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cudnn.benchmark = True
@@ -205,75 +230,24 @@ def main():
         for defect_type, prompt in defects.items():
             out_dir = os.path.join(args.output_dir, object_name, "test", defect_type)
             os.makedirs(out_dir, exist_ok=True)
-            mask_dir = os.path.join(
-                args.output_dir, object_name, "ground_truth", defect_type
-            )
+            mask_dir = os.path.join(args.output_dir, object_name, "ground_truth", defect_type)
             if not args.no_mask:
                 os.makedirs(mask_dir, exist_ok=True)
 
-            # Resume support: if images were already generated for this
-            # <object>/<defect_type>, continue from the index right after the
-            # highest existing one instead of overwriting. This lets an
-            # interrupted run pick up where it left off (total target stays
-            # ``args.num_images``).
-            existing_idx = [
-                int(os.path.splitext(f)[0])
-                for f in os.listdir(out_dir)
-                if f.lower().endswith(IMAGE_EXTS)
-                and os.path.isfile(os.path.join(out_dir, f))
-                and os.path.splitext(f)[0].isdigit()
-            ]
-            start_idx = (max(existing_idx) + 1) if existing_idx else 0
-            n_new = max(0, args.num_images - start_idx)
+            start_idx, n_new = _resume_start(out_dir, args.num_images)
 
             print(f"[{object_name}/{defect_type}] prompt={prompt}")
             if start_idx > 0:
-                print(
-                    f"  resuming from index {start_idx} "
-                    f"({n_new} new image(s) to reach {args.num_images})"
-                )
+                print(f"  resuming from index {start_idx} ({n_new} new image(s) to reach {args.num_images})")
             print(f"  -> {n_new} new image(s) into {out_dir}")
 
-            # Precompute the text-conditioning ONCE per defect (every image for a
-            # defect shares the same prompt) so we don't re-run the text encoder
-            # for every single image. The embeddings are then broadcast across the
-            # batch via .repeat().
-            enc = pipe._encode_prompt(
-                prompt,
-                device=args.device,
-                num_images_per_prompt=1,
-                do_classifier_free_guidance=True,
-            )
+            # Precompute the text-conditioning ONCE per defect
+            enc = pipe.encode_prompt(prompt, device=args.device, num_images_per_prompt=1, do_classifier_free_guidance=True)
             prompt_embeds, neg_embeds = enc[0], enc[1]
 
             indices = list(range(start_idx, args.num_images))
-            for b_start in tqdm(
-                range(0, len(indices), args.batch_size),
-                desc=f"{object_name}/{defect_type}",
-                leave=False,
-            ):
-                batch_idx = indices[b_start : b_start + args.batch_size]
-                B = len(batch_idx)
-                # Load + resize the clean inputs (mirrors generate_image's
-                # preprocessing) for this batch.
-                clean_paths = [clean_images[i % len(clean_images)] for i in batch_idx]
-                batch_pils = [
-                    Image.open(p).convert("RGB").resize((512, 512)) for p in clean_paths
-                ]
-                out = pipe(
-                    prompt_embeds=prompt_embeds.repeat(B, 1, 1),
-                    negative_prompt_embeds=neg_embeds.repeat(B, 1, 1),
-                    image=batch_pils,
-                    num_inference_steps=20,
-                ).images
-                for j, i in enumerate(batch_idx):
-                    generated = out[j]
-                    gen_path = os.path.join(out_dir, f"{i:03d}.png")
-                    generated.save(gen_path)
-
-                    if not args.no_mask:
-                        mask = compute_defect_mask(clean_paths[j], generated)
-                        mask.save(os.path.join(mask_dir, f"{i:03d}_mask.png"))
+            if indices:
+                _generate_one_defect(pipe, prompt_embeds, neg_embeds, clean_images, out_dir, mask_dir, indices, args.bs, args.no_mask)
 
             print(f"  saved {n_new} new image(s) to {out_dir}")
 

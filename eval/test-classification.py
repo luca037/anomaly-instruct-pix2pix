@@ -11,7 +11,7 @@ Usage
 -----
     uv run eval/test-classification.py \
         --mvtec_path /home/luca_piai/big_disk/datasets/mvtec \
-        --generated_data_path /home/luca_piai/big_disk/datasets/generated \
+        --generated_path /home/luca_piai/big_disk/datasets/generated \
         --checkpoint_path eval/checkpoints/classification \
         --categories cable screw transistor leather hazelnut pill tile \
         --device cuda:1
@@ -27,10 +27,20 @@ import torchvision
 from torchvision.models import resnet34
 from unet_utils.data_loader import MVTec_classification_test, MVTec_classification_train
 
-CATEGORIES = [  # noqa: E501
-    "cable", "screw", "transistor", "leather", "hazelnut", "pill", "tile",
-    "carpet", "capsule", "wood", "metal_nut",
-]
+from common import DEFAULT_CLASSIFICATION_CKPT, add_common_args
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Evaluate per-object defect classifiers.")
+    add_common_args(parser, ckpt_default=DEFAULT_CLASSIFICATION_CKPT)
+    parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument(
+        "--clip_bad_json",
+        type=str,
+        default=None,
+        help="Optional path to clip_bad.json; if given, the generated train set accuracy (eval_train_set) skips BAD images.",
+    )
+    return parser.parse_args()
 
 
 def test(args, obj_name, model, anomaly_names):
@@ -86,9 +96,7 @@ def eval_train_set(args, obj_name, model):
     loss_sum = 0.0
     model.eval()
     with torch.no_grad():
-        for idx in range(
-            train_dataset.length
-        ):  # unique images only (skip the 5x oversample)
+        for idx in range(train_dataset.length):  # unique images only (skip the 5x oversample)
             image, label = train_dataset[idx]
             image = image.unsqueeze(0).to(args.device)
             label = torch.tensor([label], device=args.device)
@@ -110,20 +118,14 @@ def test_on_device(obj_names, args):
     for obj_name in obj_names:
         print(obj_name)
         run_name = obj_name
-        # The train dataset defines the class set + ordering; reuse it so the
-        # fc output dim and label indices match those used at training time.
         train_dataset = MVTec_classification_train(args, obj_name)
         class_num = train_dataset.class_num()
         anomaly_names = train_dataset.return_anomaly_names()
 
-        model = resnet34(
-            weights=torchvision.models.ResNet34_Weights.DEFAULT, progress=True
-        )
+        model = resnet34(weights=torchvision.models.ResNet34_Weights.DEFAULT, progress=True)
         model.fc = nn.Linear(model.fc.in_features, class_num)
         model = model.to(args.device)
-        model.load_state_dict(
-            torch.load(os.path.join(args.checkpoint_path, run_name + ".pckl"))
-        )
+        model.load_state_dict(torch.load(os.path.join(args.checkpoint_path, run_name + ".pckl")))
 
         train_loss, train_acc = eval_train_set(args, obj_name, model)
         acc, val_loss, per_defect = test(args, obj_name, model, anomaly_names)
@@ -137,41 +139,11 @@ def test_on_device(obj_names, args):
 
     print("\nClassification summary per object:")
     for obj_name, r in results.items():
-        print(
-            f"  {obj_name}: "
-            f"train loss={r['train_loss']:.4f} train acc={r['train_acc']:.4f} "
-            f"| val loss={r['val_loss']:.4f} val acc={r['val_acc']:.4f}"
-        )
+        print(f"  {obj_name}: train loss={r['train_loss']:.4f} train acc={r['train_acc']:.4f} | val loss={r['val_loss']:.4f} val acc={r['val_acc']:.4f}")
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Evaluate per-object defect classifiers."
-    )
-    parser.add_argument("--device", type=str, default="cuda:1", help="e.g. cuda:1")
-    parser.add_argument(
-        "--mvtec_path", type=str, required=True, help="Path to real MVTec dataset"
-    )
-    parser.add_argument(
-        "--generated_data_path",
-        type=str,
-        required=True,
-        help="Path to generated defect images (defines classes)",
-    )
-    parser.add_argument(
-        "--checkpoint_path", default="eval/checkpoints/classification", type=str
-    )
-    parser.add_argument("--categories", type=str, nargs="+", default=CATEGORIES)
-    parser.add_argument("--num_workers", type=int, default=4)
-    parser.add_argument(
-        "--clip_bad_json",
-        type=str,
-        default=None,
-        help="Optional path to clip_bad.json; if given, the generated train "
-        "set accuracy (eval_train_set) skips BAD images.",
-    )
-    args = parser.parse_args()
-
+    args = parse_args()
     test_on_device(args.categories, args)
 
 
