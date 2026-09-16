@@ -1,0 +1,80 @@
+{
+    "cable": {
+        "bent_wire": "a kinked cable",
+        "cable_swap": "swap cables: one brown two green",
+        "combined": "add multiple defects to the cable",
+        "cut_inner_insulation": "cut inner insulation",
+        "cut_outer_insulation": "cut outer insulation",
+        "missing_cable": "remove a cable",
+        "missing_wire": "remove a wire",
+        "poke_insulation": "add a poke in the insulation"
+    },
+    "screw": {
+        "manipulated_front": "a screw with a blunted tip",
+        "scratch_head": "add a scratch on the head of the screw",
+        "scratch_neck": "gouged smooth shank",
+        "thread_side": "add a scratch on the thread side",
+        "thread_top": "add a scratch on the thread top"
+    },
+    "transistor": {
+        "bent_lead": "add bent or shorted leads to the transistor",
+        "cut_lead": "snapped terminal",
+        "damaged_case": "chipped housing",
+        "misplaced": "the transistor is misplaced"
+    },
+    "leather": {
+        "color": "the leather has a color defect",
+        "cut": "add a cut to the surface of the leather",
+        "fold": "add a fold",
+        "glue": "add a glue mark upon the leather",
+        "poke": "add a poke hole"
+    },
+    "hazelnut": {
+        "crack": "add a crack",
+        "cut": "add scratches to the surface",
+        "hole": "add an insect bore hole",
+        "print": "add white marks to the surface"
+    },
+    "pill": {
+        "color": "add pink colored mark",
+        "combined": "add a hole and a chipped edge",
+        "contamination": "add an embedded contaminant",
+        "crack": "add a crack to the pill",
+        "faulty_imprint": "the imprint is wrong",
+        "pill_type": "add blue/green/red/yellow dots",
+        "scratch": "eroded surface"
+    },
+    "tile": {
+        "crack": "add an hairline crack",
+        "glue_strip": "add a glue strip",
+        "gray_stroke": "add a gray stroke",
+        "oil": "add a chemical stain to the tile",
+        "rough": "the surface is rough"
+    },
+    "wood": {
+        "color": "discoloration",
+        "combined": "discolored surface and an insect bore hole",
+        "hole": "add an insect bore hole",
+        "liquid": "add liquid stain",
+        "scratch": "add surface abrasions or deep scratches" 
+    },
+    "carpet": {
+        "color": "add chemical stain",
+        "cut": "add a cut",
+        "hole": "add a small hole",
+        "thread": "add a thread on the surface"
+    },
+    "capsule": {
+        "crack": "add a crack",
+        "faulty_imprint": "the imprint is wrong",
+        "poke":"add a small poke",
+        "scratch": "add scratches",
+        "squeeze": "squeezed capsule"
+    },
+    "metal_nut": {
+        "bent": "bend the surface",
+        "color": "add colored marks on the surface",
+        "flip": "rotate the object",
+        "scratch": "add scratches on the surface"
+    }
+}
