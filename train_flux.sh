@@ -1,21 +1,21 @@
-CUDA_VISIBLE_DEVICES=2 accelerate launch finetune_flux2_klein_lora.py \
+CUDA_VISIBLE_DEVICES=1 accelerate launch finetune_flux2_klein_lora.py \
        --pretrained_model_name_or_path="black-forest-labs/FLUX.2-klein-4B" \
        --train_data_dir="/home/luca_piai/big_disk/datasets/train_set/" \
        --output_dir="/home/luca_piai/big_disk/flux2_klein_lora_output/" \
        --original_image_column="original_image" \
        --edited_image_column="edited_image" \
        --edit_prompt_column="edit_prompt" \
-       --dataloader_num_workers=16 \
+       --dataloader_num_workers=32 \
        --resolution=512 \
        --train_batch_size=8 \
        --gradient_accumulation_steps=2 \
        --gradient_checkpointing \
        --learning_rate=1e-4 \
        --random_flip \
-       --rank=16 \
-       --lora_alpha=16 \
-       --max_train_steps=1200 \
-       --checkpointing_steps=100 \
+       --rank=32 \
+       --lora_alpha=32 \
+       --max_train_steps=10000 \
+       --checkpointing_steps=500 \
        --mixed_precision="bf16" \
        --allow_tf32 \
        --report_to="wandb" \
@@ -24,4 +24,5 @@ CUDA_VISIBLE_DEVICES=2 accelerate launch finetune_flux2_klein_lora.py \
        --num_validation_images=2 \
        --validation_epochs=5 \
        --guidance_scale=1.0 \
+       --torch_compile \
        --seed=42
