@@ -54,6 +54,11 @@ logger = get_logger(__name__, log_level="INFO")
 WANDB_TABLE_COL_NAMES = ["original_image", "winner_image", "edit_prompt"]
 
 
+# ---------------------------------------------------------------------------
+# CLI Arguments
+# ---------------------------------------------------------------------------
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="DPO alignment for InstructPix2Pix.")
     parser.add_argument(
@@ -144,6 +149,11 @@ def get_full_repo_name(model_id: str, organization: Optional[str] = None, token:
         return f"{organization}/{model_id}"
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
 def convert_to_np(image, resolution):
     image = image.convert("RGB").resize((resolution, resolution))
     return np.array(image).transpose(2, 0, 1)
@@ -157,6 +167,11 @@ def download_image(url_or_path):
     image = PIL.ImageOps.exif_transpose(image)
     image = image.convert("RGB")
     return image
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 
 def main():
@@ -432,6 +447,9 @@ def main():
     progress_bar = tqdm(range(global_step, args.max_train_steps), disable=not accelerator.is_local_main_process)
     progress_bar.set_description("Steps")
 
+    # ------------------------------------------------------------------
+    # Training loop
+    # ------------------------------------------------------------------
     for epoch in range(first_epoch, args.num_train_epochs):
         unet.train()
         train_loss = 0.0
@@ -443,37 +461,52 @@ def main():
                 continue
 
             with accelerator.accumulate(unet):
-                # Encode winner/loser to latents, original to cond embeds
+                # ==========================================================
+                # 1. Encode winner / loser to latents + original to cond
+                # ==========================================================
                 winner_latents = vae.encode(batch["winner_pixel_values"].to(weight_dtype)).latent_dist.sample() * vae.config.scaling_factor
                 loser_latents = vae.encode(batch["loser_pixel_values"].to(weight_dtype)).latent_dist.sample() * vae.config.scaling_factor
                 original_embeds = vae.encode(batch["original_pixel_values"].to(weight_dtype)).latent_dist.mode()
 
+                # ==========================================================
+                # 2. Sample shared timesteps + noise per preference pair
+                # ==========================================================
                 bsz = winner_latents.shape[0]
-                # Shared timesteps and noise per pair (as in DiffusionDPO)
                 timesteps = torch.randint(0, noise_scheduler.num_train_timesteps, (bsz,), device=winner_latents.device).long()
                 noise = torch.randn_like(winner_latents)
-                # Duplicate for loser so w/l share same t and noise
                 noise_l = noise.clone()
                 timesteps_w = timesteps
                 timesteps_l = timesteps
 
+                # ==========================================================
+                # 3. Add noise to latents (forward diffusion)
+                # ==========================================================
                 noisy_winner = noise_scheduler.add_noise(winner_latents, noise, timesteps_w)
                 noisy_loser = noise_scheduler.add_noise(loser_latents, noise_l, timesteps_l)
 
+                # ==========================================================
+                # 4. Encode text prompt
+                # ==========================================================
                 encoder_hidden_states = text_encoder(batch["input_ids"])[0]
 
-                # Concatenate conditioning image for ip2p (8 channels)
+                # ==========================================================
+                # 5. Concatenate conditioning image (ip2p: 8 channels)
+                # ==========================================================
                 concat_winner = torch.cat([noisy_winner, original_embeds], dim=1)
                 concat_loser = torch.cat([noisy_loser, original_embeds], dim=1)
-                # Stack w/l for batched forward (2*bsz)
                 concat_all = torch.cat([concat_winner, concat_loser], dim=0)
                 timesteps_all = torch.cat([timesteps_w, timesteps_l], dim=0)
                 encoder_hidden_states_all = torch.cat([encoder_hidden_states, encoder_hidden_states], dim=0)
                 target_all = torch.cat([noise, noise_l], dim=0)
 
+                # ==========================================================
+                # 6. UNet forward (policy)
+                # ==========================================================
                 model_pred = unet(concat_all, timesteps_all, encoder_hidden_states_all).sample
 
-                # DPO loss
+                # ==========================================================
+                # 7. DPO loss (Diffusion-DPO)
+                # ==========================================================
                 model_losses = (model_pred - target_all).pow(2).mean(dim=[1, 2, 3])
                 model_losses_w, model_losses_l = model_losses.chunk(2)
                 model_diff = model_losses_w - model_losses_l
@@ -523,6 +556,9 @@ def main():
             if global_step >= args.max_train_steps:
                 break
 
+        # ==============================================================
+        # End-of-epoch validation
+        # ==============================================================
         if accelerator.is_main_process and args.val_image_url is not None and args.validation_prompt is not None and (epoch % args.validation_epochs == 0):
             logger.info(f"Validation: {args.validation_prompt}")
             unet_eval = accelerator.unwrap_model(unet)
@@ -548,6 +584,9 @@ def main():
             del pipeline
             torch.cuda.empty_cache()
 
+    # ==================================================================
+    # Save final pipeline
+    # ==================================================================
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         unet = accelerator.unwrap_model(unet)
