@@ -66,10 +66,16 @@ DATASET_NAME_MAPPING = {
 WANDB_TABLE_COL_NAMES = ["original_image", "edited_image", "edit_prompt"]
 
 
+# ---------------------------------------------------------------------------
+# CLI Arguments
+# ---------------------------------------------------------------------------
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Simple example of a training script for InstructPix2Pix."
     )
+    # -- Model --
     parser.add_argument(
         "--pretrained_model_name_or_path",
         type=str,
@@ -437,12 +443,19 @@ def get_full_repo_name(
         return f"{organization}/{model_id}"
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
 def convert_to_np(image, resolution):
+    """Resize a PIL image and convert to CHW numpy array."""
     image = image.convert("RGB").resize((resolution, resolution))
     return np.array(image).transpose(2, 0, 1)
 
 
 def download_image(url_or_path):
+    """Load an image from a URL or local path, applying EXIF orientation."""
     if url_or_path.startswith("http://") or url_or_path.startswith("https://"):
         image = PIL.Image.open(requests.get(url_or_path, stream=True).raw)
     else:
@@ -452,9 +465,17 @@ def download_image(url_or_path):
     return image
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
 def main():
     args = parse_args()
 
+    # ------------------------------------------------------------------
+    # Accelerator
+    # ------------------------------------------------------------------
     if args.non_ema_revision is not None:
         deprecate(
             "non_ema_revision!=None",
@@ -944,6 +965,9 @@ def main():
     )
     progress_bar.set_description("Steps")
 
+    # ------------------------------------------------------------------
+    # Training loop
+    # ------------------------------------------------------------------
     for epoch in range(first_epoch, args.num_train_epochs):
         unet.train()
         train_loss = 0.0
@@ -959,18 +983,19 @@ def main():
                 continue
 
             with accelerator.accumulate(unet):
-                # We want to learn the denoising process w.r.t the edited images which
-                # are conditioned on the original image (which was edited) and the edit instruction.
-                # So, first, convert images to latent space.
+                # ==========================================================
+                # 1. Encode edited image to latents
+                # ==========================================================
                 latents = vae.encode(
                     batch["edited_pixel_values"].to(weight_dtype)
                 ).latent_dist.sample()
                 latents = latents * vae.config.scaling_factor
 
-                # Sample noise that we'll add to the latents
+                # ==========================================================
+                # 2. Sample noise + timesteps
+                # ==========================================================
                 noise = torch.randn_like(latents)
                 bsz = latents.shape[0]
-                # Sample a random timestep for each image
                 timesteps = torch.randint(
                     0,
                     noise_scheduler.num_train_timesteps,
@@ -979,19 +1004,26 @@ def main():
                 )
                 timesteps = timesteps.long()
 
-                # Add noise to the latents according to the noise magnitude at each timestep
-                # (this is the forward diffusion process)
+                # ==========================================================
+                # 3. Add noise to latents (forward diffusion)
+                # ==========================================================
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
-                # Get the text embedding for conditioning.
+                # ==========================================================
+                # 4. Encode text prompt
+                # ==========================================================
                 encoder_hidden_states = text_encoder(batch["input_ids"])[0]
 
-                # Get the additional image embedding for conditioning.
-                # Instead of getting a diagonal Gaussian here, we simply take the mode.
+                # ==========================================================
+                # 5. Encode conditioning original image
+                # ==========================================================
                 original_image_embeds = vae.encode(
                     batch["original_pixel_values"].to(weight_dtype)
                 ).latent_dist.mode()
 
+                # ==========================================================
+                # 6. Conditioning dropout (CFG training)
+                # ==========================================================
                 # Conditioning dropout to support classifier-free guidance during inference. For more details
                 # check out the section 3.2.1 of the original paper https://arxiv.org/abs/2211.09800.
                 if args.conditioning_dropout_prob is not None:
@@ -1023,12 +1055,16 @@ def main():
                     # Final image conditioning.
                     original_image_embeds = image_mask * original_image_embeds
 
-                # Concatenate the `original_image_embeds` with the `noisy_latents`.
+                # ==========================================================
+                # 7. Concatenate conditioning (ip2p: 8 channels)
+                # ==========================================================
                 concatenated_noisy_latents = torch.cat(
                     [noisy_latents, original_image_embeds], dim=1
                 )
 
-                # Get the target for loss depending on the prediction type
+                # ==========================================================
+                # 8. Get target (epsilon / v_prediction)
+                # ==========================================================
                 if noise_scheduler.config.prediction_type == "epsilon":
                     target = noise
                 elif noise_scheduler.config.prediction_type == "v_prediction":
@@ -1038,7 +1074,9 @@ def main():
                         f"Unknown prediction type {noise_scheduler.config.prediction_type}"
                     )
 
-                # Predict the noise residual and compute loss
+                # ==========================================================
+                # 9. UNet forward + MSE loss
+                # ==========================================================
                 model_pred = unet(
                     concatenated_noisy_latents, timesteps, encoder_hidden_states
                 ).sample
@@ -1082,6 +1120,9 @@ def main():
             if global_step >= args.max_train_steps:
                 break
 
+        # ==============================================================
+        # End-of-epoch validation
+        # ==============================================================
         if accelerator.is_main_process:
             if (
                 (args.val_image_url is not None)
@@ -1149,7 +1190,9 @@ def main():
                 del pipeline
                 torch.cuda.empty_cache()
 
-    # Create the pipeline using the trained modules and save it.
+    # ==================================================================
+    # Save final pipeline
+    # ==================================================================
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         unet = accelerator.unwrap_model(unet)
