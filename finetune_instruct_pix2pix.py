@@ -38,14 +38,18 @@ from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration, set_seed
 from datasets import load_dataset
-from diffusers import (AutoencoderKL, DDPMScheduler,
-                       StableDiffusionInstructPix2PixPipeline,
-                       UNet2DConditionModel)
+from diffusers import (
+    AutoencoderKL,
+    DDPMScheduler,
+    StableDiffusionInstructPix2PixPipeline,
+    UNet2DConditionModel,
+)
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.utils import check_min_version, deprecate, is_wandb_available
 from diffusers.utils.import_utils import is_xformers_available
-#from huggingface_hub import HfFolder, Repository, create_repo, whoami # Deprected in my hf version!
+
+# from huggingface_hub import HfFolder, Repository, create_repo, whoami # Deprected in my hf version!
 from packaging import version
 from torchvision import transforms
 from tqdm.auto import tqdm
@@ -182,9 +186,7 @@ def parse_args():
         default=None,
         help="The directory where the downloaded models and datasets will be stored.",
     )
-    parser.add_argument(
-        "--seed", type=int, default=None, help="A seed for reproducible training."
-    )
+    parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
     parser.add_argument(
         "--resolution",
         type=int,
@@ -278,9 +280,7 @@ def parse_args():
             " https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices"
         ),
     )
-    parser.add_argument(
-        "--use_ema", action="store_true", help="Whether to use EMA model."
-    )
+    parser.add_argument("--use_ema", action="store_true", help="Whether to use EMA model.")
     parser.add_argument(
         "--non_ema_revision",
         type=str,
@@ -320,9 +320,7 @@ def parse_args():
         default=1e-08,
         help="Epsilon value for the Adam optimizer",
     )
-    parser.add_argument(
-        "--max_grad_norm", default=1.0, type=float, help="Max gradient norm."
-    )
+    parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
     parser.add_argument(
         "--push_to_hub",
         action="store_true",
@@ -412,7 +410,7 @@ def parse_args():
         "--torch_compile",
         default=False,
         action="store_true",
-        help="Whether or not to use torch.complie."
+        help="Whether or not to use torch.complie.",
     )
 
     args = parser.parse_args()
@@ -529,15 +527,11 @@ def main():
     if accelerator.is_main_process:
         if args.push_to_hub:
             if args.hub_model_id is None:
-                repo_name = get_full_repo_name(
-                    Path(args.output_dir).name, token=args.hub_token
-                )
+                repo_name = get_full_repo_name(Path(args.output_dir).name, token=args.hub_token)
             else:
                 repo_name = args.hub_model_id
             create_repo(repo_name, exist_ok=True, token=args.hub_token)
-            repo = Repository(
-                args.output_dir, clone_from=repo_name, token=args.hub_token
-            )
+            repo = Repository(args.output_dir, clone_from=repo_name, token=args.hub_token)
 
             with open(os.path.join(args.output_dir, ".gitignore"), "w+") as gitignore:
                 if "step_*" not in gitignore:
@@ -594,9 +588,7 @@ def main():
                 )
             unet.enable_xformers_memory_efficient_attention()
         else:
-            raise ValueError(
-                "xformers is not available. Make sure it is installed correctly"
-            )
+            raise ValueError("xformers is not available. Make sure it is installed correctly")
 
     # `accelerate` 0.16.0 will have better support for customized saving
     if version.parse(accelerate.__version__) >= version.parse("0.16.0"):
@@ -625,13 +617,11 @@ def main():
                 model = models.pop()
 
                 # load diffusers style into model
-                load_model = UNet2DConditionModel.from_pretrained(
-                    input_dir, subfolder="unet"
-                )
-                
+                load_model = UNet2DConditionModel.from_pretrained(input_dir, subfolder="unet")
+
                 # Unwrap the model if it was compiled by torch.compile
                 target_model = getattr(model, "_orig_mod", model)
-                
+
                 target_model.register_to_config(**load_model.config)
                 target_model.load_state_dict(load_model.state_dict())
                 del load_model
@@ -665,10 +655,10 @@ def main():
             )
 
         optimizer_cls = bnb.optim.AdamW8bit
-        fused_available = 'fused' in inspect.signature(bnb.optim.AdamW8bit).parameters
+        fused_available = "fused" in inspect.signature(bnb.optim.AdamW8bit).parameters
     else:
         optimizer_cls = torch.optim.AdamW
-        fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
+        fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
 
     if fused_available:
         print("Using fused=True.")
@@ -679,7 +669,7 @@ def main():
         betas=(args.adam_beta1, args.adam_beta2),
         weight_decay=args.adam_weight_decay,
         eps=args.adam_epsilon,
-        fused=fused_available
+        fused=fused_available,
     )
 
     # Get the datasets: you can either provide your own training and evaluation files (see below)
@@ -704,17 +694,22 @@ def main():
                 data_files={"train": metadata_path},
                 cache_dir=args.cache_dir,
             )
-            
+
             # 2. Prepend the directory path so Python knows exactly where the files are
             def make_absolute_paths(example):
-                example[args.original_image_column] = os.path.join(args.train_data_dir, example[args.original_image_column])
-                example[args.edited_image_column] = os.path.join(args.train_data_dir, example[args.edited_image_column])
+                example[args.original_image_column] = os.path.join(
+                    args.train_data_dir, example[args.original_image_column]
+                )
+                example[args.edited_image_column] = os.path.join(
+                    args.train_data_dir, example[args.edited_image_column]
+                )
                 return example
-                
+
             dataset["train"] = dataset["train"].map(make_absolute_paths)
-            
+
             # 3. Tell the dataset to open these strings as actual Images
             from datasets import Image
+
             dataset = dataset.cast_column(args.original_image_column, Image())
             dataset = dataset.cast_column(args.edited_image_column, Image())
 
@@ -735,9 +730,7 @@ def main():
                 f"--original_image_column' value '{args.original_image_column}' needs to be one of: {', '.join(column_names)}"
             )
     if args.edit_prompt_column is None:
-        edit_prompt_column = (
-            dataset_columns[1] if dataset_columns is not None else column_names[1]
-        )
+        edit_prompt_column = dataset_columns[1] if dataset_columns is not None else column_names[1]
     else:
         edit_prompt_column = args.edit_prompt_column
         if edit_prompt_column not in column_names:
@@ -745,9 +738,7 @@ def main():
                 f"--edit_prompt_column' value '{args.edit_prompt_column}' needs to be one of: {', '.join(column_names)}"
             )
     if args.edited_image_column is None:
-        edited_image_column = (
-            dataset_columns[2] if dataset_columns is not None else column_names[2]
-        )
+        edited_image_column = dataset_columns[2] if dataset_columns is not None else column_names[2]
     else:
         edited_image_column = args.edited_image_column
         if edited_image_column not in column_names:
@@ -781,16 +772,10 @@ def main():
 
     def preprocess_images(examples):
         original_images = np.concatenate(
-            [
-                convert_to_np(image, args.resolution)
-                for image in examples[original_image_column]
-            ]
+            [convert_to_np(image, args.resolution) for image in examples[original_image_column]]
         )
         edited_images = np.concatenate(
-            [
-                convert_to_np(image, args.resolution)
-                for image in examples[edited_image_column]
-            ]
+            [convert_to_np(image, args.resolution) for image in examples[edited_image_column]]
         )
         # We need to ensure that the original and the edited images undergo the same
         # augmentation transforms.
@@ -806,9 +791,7 @@ def main():
         # applying the transformations, we need to separate them and reshape
         # them accordingly.
         original_images, edited_images = preprocessed_images.chunk(2)
-        original_images = original_images.reshape(
-            -1, 3, args.resolution, args.resolution
-        )
+        original_images = original_images.reshape(-1, 3, args.resolution, args.resolution)
         edited_images = edited_images.reshape(-1, 3, args.resolution, args.resolution)
 
         # Collate the preprocessed images into the `examples`.
@@ -823,9 +806,7 @@ def main():
     with accelerator.main_process_first():
         if args.max_train_samples is not None:
             dataset["train"] = (
-                dataset["train"]
-                .shuffle(seed=args.seed)
-                .select(range(args.max_train_samples))
+                dataset["train"].shuffle(seed=args.seed).select(range(args.max_train_samples))
             )
         # Set the training transforms
         train_dataset = dataset["train"].with_transform(preprocess_train)
@@ -837,12 +818,8 @@ def main():
         original_pixel_values = original_pixel_values.to(
             memory_format=torch.contiguous_format
         ).float()
-        edited_pixel_values = torch.stack(
-            [example["edited_pixel_values"] for example in examples]
-        )
-        edited_pixel_values = edited_pixel_values.to(
-            memory_format=torch.contiguous_format
-        ).float()
+        edited_pixel_values = torch.stack([example["edited_pixel_values"] for example in examples])
+        edited_pixel_values = edited_pixel_values.to(memory_format=torch.contiguous_format).float()
         input_ids = torch.stack([example["input_ids"] for example in examples])
         return {
             "original_pixel_values": original_pixel_values,
@@ -861,9 +838,7 @@ def main():
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
-    num_update_steps_per_epoch = math.ceil(
-        len(train_dataloader) / args.gradient_accumulation_steps
-    )
+    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if args.max_train_steps is None:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
@@ -899,9 +874,7 @@ def main():
     vae.to(accelerator.device, dtype=weight_dtype)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
-    num_update_steps_per_epoch = math.ceil(
-        len(train_dataloader) / args.gradient_accumulation_steps
-    )
+    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if overrode_max_train_steps:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
@@ -914,9 +887,7 @@ def main():
 
     # Train!
     total_batch_size = (
-        args.train_batch_size
-        * accelerator.num_processes
-        * args.gradient_accumulation_steps
+        args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
     )
 
     logger.info("***** Running training *****")
@@ -973,11 +944,7 @@ def main():
         train_loss = 0.0
         for step, batch in enumerate(train_dataloader):
             # Skip steps until we reach the resumed step
-            if (
-                args.resume_from_checkpoint
-                and epoch == first_epoch
-                and step < resume_step
-            ):
+            if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
                 if step % args.gradient_accumulation_steps == 0:
                     progress_bar.update(1)
                 continue
@@ -1027,9 +994,7 @@ def main():
                 # Conditioning dropout to support classifier-free guidance during inference. For more details
                 # check out the section 3.2.1 of the original paper https://arxiv.org/abs/2211.09800.
                 if args.conditioning_dropout_prob is not None:
-                    random_p = torch.rand(
-                        bsz, device=latents.device, generator=generator
-                    )
+                    random_p = torch.rand(bsz, device=latents.device, generator=generator)
                     # Sample masks for the edit prompts.
                     prompt_mask = random_p < 2 * args.conditioning_dropout_prob
                     prompt_mask = prompt_mask.reshape(bsz, 1, 1)
@@ -1044,12 +1009,8 @@ def main():
                     # Sample masks for the original images.
                     image_mask_dtype = original_image_embeds.dtype
                     image_mask = 1 - (
-                        (random_p >= args.conditioning_dropout_prob).to(
-                            image_mask_dtype
-                        )
-                        * (random_p < 3 * args.conditioning_dropout_prob).to(
-                            image_mask_dtype
-                        )
+                        (random_p >= args.conditioning_dropout_prob).to(image_mask_dtype)
+                        * (random_p < 3 * args.conditioning_dropout_prob).to(image_mask_dtype)
                     )
                     image_mask = image_mask.reshape(bsz, 1, 1, 1)
                     # Final image conditioning.
@@ -1105,9 +1066,7 @@ def main():
 
                 if global_step % args.checkpointing_steps == 0:
                     if accelerator.is_main_process:
-                        save_path = os.path.join(
-                            args.output_dir, f"checkpoint-{global_step}"
-                        )
+                        save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                         accelerator.save_state(save_path)
                         logger.info(f"Saved state to {save_path}")
 
@@ -1140,7 +1099,9 @@ def main():
                     ema_unet.copy_to(unet.parameters())
                 pipeline = StableDiffusionInstructPix2PixPipeline.from_pretrained(
                     args.pretrained_model_name_or_path,
-                    unet=getattr(accelerator.unwrap_model(unet), "_orig_mod", accelerator.unwrap_model(unet)),
+                    unet=getattr(
+                        accelerator.unwrap_model(unet), "_orig_mod", accelerator.unwrap_model(unet)
+                    ),
                     revision=args.revision,
                     torch_dtype=weight_dtype,
                     safety_checker=None,
@@ -1152,10 +1113,10 @@ def main():
                 # run inference
                 original_image = download_image(args.val_image_url)
                 edited_images = []
-                #with torch.autocast(
+                # with torch.autocast(
                 #    str(accelerator.device),
                 #    enabled=accelerator.mixed_precision == "fp16",
-                #):
+                # ):
                 with torch.autocast(
                     str(accelerator.device),
                     dtype=weight_dtype,
@@ -1209,9 +1170,7 @@ def main():
         pipeline.save_pretrained(args.output_dir)
 
         if args.push_to_hub:
-            repo.push_to_hub(
-                commit_message="End of training", blocking=False, auto_lfs_prune=True
-            )
+            repo.push_to_hub(commit_message="End of training", blocking=False, auto_lfs_prune=True)
 
     accelerator.end_training()
 
