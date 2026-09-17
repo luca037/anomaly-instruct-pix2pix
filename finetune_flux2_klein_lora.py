@@ -98,19 +98,32 @@ logger = get_logger(__name__, log_level="INFO")
 WANDB_TABLE_COL_NAMES = ["original_image", "edited_image", "edit_prompt"]
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
-
-
 def convert_to_np(image, resolution):
-    """Resize a PIL image and convert to CHW numpy array."""
+    """Converts a PIL image to a CHW numpy array at the given resolution.
+
+    Args:
+        image: Input PIL image.
+        resolution: Target square size.
+
+    Returns:
+        Numpy array with shape (3, resolution, resolution).
+    """
     image = image.convert("RGB").resize((resolution, resolution))
     return np.array(image).transpose(2, 0, 1)
 
 
 def load_image(url_or_path):
-    """Load an image from a URL or local path, applying EXIF orientation."""
+    """Loads an image from a URL or local path.
+
+    Handles HTTP(S) URLs and applies EXIF orientation.
+
+    Args:
+        url_or_path: Remote URL or local file path.
+
+    Returns:
+        PIL image in RGB mode.
+    """
     if url_or_path.startswith("http://") or url_or_path.startswith("https://"):
         import requests
 
@@ -124,16 +137,30 @@ def load_image(url_or_path):
     return image
 
 
-# ---------------------------------------------------------------------------
 # Validation
-# ---------------------------------------------------------------------------
-
-
 def log_validation(
-    pipeline, args, accelerator, prompt_embeds_dict, epoch, torch_dtype,
+    pipeline,
+    args,
+    accelerator,
+    prompt_embeds_dict,
+    epoch,
+    torch_dtype,
     is_final_validation=False,
 ):
-    """Run inference with the current model and log results."""
+    """Runs validation inference and logs generated images.
+
+    Args:
+        pipeline: Flux pipeline with the current LoRA weights.
+        args: Parsed training arguments.
+        accelerator: Accelerator instance.
+        prompt_embeds_dict: Precomputed prompt embeddings.
+        epoch: Current epoch number.
+        torch_dtype: Dtype for inference.
+        is_final_validation: Whether this is the final validation.
+
+    Returns:
+        List of generated PIL images.
+    """
     num_val = args.num_validation_images or 1
     logger.info(
         f"Running validation... Generating {num_val} images "
@@ -152,9 +179,7 @@ def log_validation(
         else None
     )
     autocast_ctx = (
-        torch.autocast(accelerator.device.type)
-        if not is_final_validation
-        else nullcontext()
+        torch.autocast(accelerator.device.type) if not is_final_validation else nullcontext()
     )
 
     images = []
@@ -187,51 +212,67 @@ def log_validation(
     return images
 
 
-# ---------------------------------------------------------------------------
 # CLI Arguments
-# ---------------------------------------------------------------------------
-
-
 def parse_args():
+    """Parses command-line arguments for FLUX LoRA training.
+
+    Returns:
+        Parsed arguments namespace.
+    """
     parser = argparse.ArgumentParser(
         description="LoRA fine-tuning script for FLUX.2 Klein 4B (InstructPix2Pix-style editing)."
     )
 
     # -- Model --
     parser.add_argument(
-        "--pretrained_model_name_or_path", type=str, required=True,
+        "--pretrained_model_name_or_path",
+        type=str,
+        required=True,
         help="Path to pretrained model or HuggingFace model identifier.",
     )
     parser.add_argument("--revision", type=str, default=None)
-    parser.add_argument("--variant", type=str, default=None,
-                        help="Model variant for loading (e.g. 'fp16').")
+    parser.add_argument(
+        "--variant", type=str, default=None, help="Model variant for loading (e.g. 'fp16')."
+    )
 
     # -- Dataset --
     parser.add_argument(
-        "--dataset_name", type=str, default=None,
+        "--dataset_name",
+        type=str,
+        default=None,
         help="HuggingFace dataset name or local path.",
     )
     parser.add_argument("--dataset_config_name", type=str, default=None)
     parser.add_argument(
-        "--train_data_dir", type=str, default=None,
+        "--train_data_dir",
+        type=str,
+        default=None,
         help="Folder containing training data with a metadata.jsonl file.",
     )
     parser.add_argument(
-        "--original_image_column", type=str, default="original_image",
+        "--original_image_column",
+        type=str,
+        default="original_image",
         help="Dataset column containing the original (clean) image.",
     )
     parser.add_argument(
-        "--edited_image_column", type=str, default="cartoonized_image",
+        "--edited_image_column",
+        type=str,
+        default="cartoonized_image",
         help="Dataset column containing the edited (target) image.",
     )
     parser.add_argument(
-        "--edit_prompt_column", type=str, default="edit_prompt",
+        "--edit_prompt_column",
+        type=str,
+        default="edit_prompt",
         help="Dataset column containing the edit instruction.",
     )
 
     # -- Validation --
     parser.add_argument(
-        "--val_image_url", type=str, default=None,
+        "--val_image_url",
+        type=str,
+        default=None,
         help="Path or URL to the original image for validation.",
     )
     parser.add_argument("--validation_prompt", type=str, default=None)
@@ -240,7 +281,9 @@ def parse_args():
 
     # -- Output --
     parser.add_argument(
-        "--output_dir", type=str, default="flux2-klein-lora-model",
+        "--output_dir",
+        type=str,
+        default="flux2-klein-lora-model",
         help="Output directory for checkpoints and final LoRA weights.",
     )
     parser.add_argument("--cache_dir", type=str, default=None)
@@ -262,13 +305,17 @@ def parse_args():
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--scale_lr", action="store_true")
     parser.add_argument(
-        "--lr_scheduler", type=str, default="constant",
+        "--lr_scheduler",
+        type=str,
+        default="constant",
         help='One of: "linear", "cosine", "cosine_with_restarts", '
-             '"polynomial", "constant", "constant_with_warmup".',
+        '"polynomial", "constant", "constant_with_warmup".',
     )
     parser.add_argument("--lr_warmup_steps", type=int, default=500)
     parser.add_argument(
-        "--conditioning_dropout_prob", type=float, default=None,
+        "--conditioning_dropout_prob",
+        type=float,
+        default=None,
         help="Probability of dropping text and/or image conditioning for CFG training.",
     )
     parser.add_argument("--max_grad_norm", type=float, default=1.0)
@@ -282,24 +329,33 @@ def parse_args():
 
     # -- Hardware --
     parser.add_argument("--allow_tf32", action="store_true")
-    parser.add_argument("--torch_compile", action="store_true",
-                        help="Compile the transformer with torch.compile for faster training.")
     parser.add_argument(
-        "--mixed_precision", type=str, default=None,
+        "--torch_compile",
+        action="store_true",
+        help="Compile the transformer with torch.compile for faster training.",
+    )
+    parser.add_argument(
+        "--mixed_precision",
+        type=str,
+        default=None,
         choices=["no", "fp16", "bf16"],
     )
     parser.add_argument("--dataloader_num_workers", type=int, default=0)
 
     # -- Logging / checkpointing --
     parser.add_argument(
-        "--report_to", type=str, default="tensorboard",
+        "--report_to",
+        type=str,
+        default="tensorboard",
         help='"tensorboard", "wandb", "comet_ml", or "all".',
     )
     parser.add_argument("--local_rank", type=int, default=-1)
     parser.add_argument("--checkpointing_steps", type=int, default=500)
     parser.add_argument("--checkpoints_total_limit", type=int, default=None)
     parser.add_argument(
-        "--resume_from_checkpoint", type=str, default=None,
+        "--resume_from_checkpoint",
+        type=str,
+        default=None,
         help='Checkpoint directory or "latest".',
     )
 
@@ -308,17 +364,23 @@ def parse_args():
     parser.add_argument("--lora_alpha", type=int, default=4, help="LoRA alpha.")
     parser.add_argument("--lora_dropout", type=float, default=0.0)
     parser.add_argument(
-        "--lora_layers", type=str, default=None,
+        "--lora_layers",
+        type=str,
+        default=None,
         help="Comma-separated list of target modules for LoRA.",
     )
 
     # -- FLUX.2 specific --
     parser.add_argument(
-        "--guidance_scale", type=float, default=3.5,
+        "--guidance_scale",
+        type=float,
+        default=3.5,
         help="Guidance scale for the distilled guidance embedding.",
     )
     parser.add_argument(
-        "--weighting_scheme", type=str, default="none",
+        "--weighting_scheme",
+        type=str,
+        default="none",
         choices=["sigma_sqrt", "logit_normal", "mode", "cosmap", "none"],
         help="Timestep sampling / loss weighting strategy.",
     )
@@ -327,7 +389,9 @@ def parse_args():
     parser.add_argument("--mode_scale", type=float, default=1.29)
     parser.add_argument("--max_sequence_length", type=int, default=512)
     parser.add_argument(
-        "--text_encoder_out_layers", nargs="+", type=int,
+        "--text_encoder_out_layers",
+        nargs="+",
+        type=int,
         default=[10, 20, 30],
         help="Hidden layer indices of Qwen3 to extract for prompt embeddings.",
     )
@@ -346,20 +410,15 @@ def parse_args():
     return args
 
 
-# ---------------------------------------------------------------------------
 # Main
-# ---------------------------------------------------------------------------
-
-
 def main():
     args = parse_args()
 
-    # ------------------------------------------------------------------
     # Accelerator
-    # ------------------------------------------------------------------
     logging_dir = Path(args.output_dir, args.logging_dir)
     accelerator_project_config = ProjectConfiguration(
-        project_dir=args.output_dir, logging_dir=logging_dir,
+        project_dir=args.output_dir,
+        logging_dir=logging_dir,
     )
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -368,9 +427,7 @@ def main():
         project_config=accelerator_project_config,
     )
 
-    # ------------------------------------------------------------------
     # Logging
-    # ------------------------------------------------------------------
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
@@ -394,10 +451,7 @@ def main():
     if args.allow_tf32:
         torch.backends.cuda.matmul.allow_tf32 = True
 
-    # ------------------------------------------------------------------
     # Load models
-    # ------------------------------------------------------------------
-
     # 1. Tokenizer (Qwen2)
     tokenizer = Qwen2TokenizerFast.from_pretrained(
         args.pretrained_model_name_or_path,
@@ -462,9 +516,7 @@ def main():
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     transformer.to(accelerator.device, dtype=weight_dtype)
 
-    # ------------------------------------------------------------------
     # LoRA setup
-    # ------------------------------------------------------------------
     if args.lora_layers is not None:
         target_modules = [layer.strip() for layer in args.lora_layers.split(",")]
     else:
@@ -490,9 +542,7 @@ def main():
     if args.mixed_precision == "fp16":
         cast_training_params([transformer], dtype=torch.float32)
 
-    # ------------------------------------------------------------------
     # Text encoding pipeline (for prompt embedding)
-    # ------------------------------------------------------------------
     text_encoding_pipeline = Flux2KleinPipeline.from_pretrained(
         args.pretrained_model_name_or_path,
         vae=None,
@@ -524,17 +574,13 @@ def main():
         val_pe, _ = compute_text_embeddings(args.validation_prompt)
         validation_prompt_dict = {"prompt_embeds": val_pe}
 
-    # ------------------------------------------------------------------
     # Unwrap helper
-    # ------------------------------------------------------------------
     def unwrap_model(model):
         model = accelerator.unwrap_model(model)
         model = model._orig_mod if is_compiled_module(model) else model
         return model
 
-    # ------------------------------------------------------------------
     # Custom save / load hooks for LoRA weights
-    # ------------------------------------------------------------------
     def save_model_hook(models, weights, output_dir):
         if accelerator.is_main_process:
             transformer_lora_layers_to_save = None
@@ -558,7 +604,7 @@ def main():
         while len(models) > 0:
             model = models.pop()
             unwrapped = unwrap_model(model)
-            
+
             if isinstance(unwrapped, type(unwrap_model(transformer))):
                 transformer_model = unwrapped
             else:
@@ -570,9 +616,7 @@ def main():
             for k, v in lora_state_dict.items()
             if k.startswith("transformer.")
         }
-        transformer_state_dict = convert_unet_state_dict_to_peft(
-            transformer_state_dict
-        )
+        transformer_state_dict = convert_unet_state_dict_to_peft(transformer_state_dict)
         incompatible = set_peft_model_state_dict(
             transformer_model, transformer_state_dict, adapter_name="default"
         )
@@ -584,9 +628,7 @@ def main():
     accelerator.register_save_state_pre_hook(save_model_hook)
     accelerator.register_load_state_pre_hook(load_model_hook)
 
-    # ------------------------------------------------------------------
     # Optimizer
-    # ------------------------------------------------------------------
     if args.use_8bit_adam:
         try:
             import bitsandbytes as bnb
@@ -603,12 +645,10 @@ def main():
         betas=(args.adam_beta1, args.adam_beta2),
         weight_decay=args.adam_weight_decay,
         eps=args.adam_epsilon,
-        fused = 'fused' in inspect.signature(optimizer_cls).parameters
+        fused="fused" in inspect.signature(optimizer_cls).parameters,
     )
 
-    # ------------------------------------------------------------------
     # Dataset
-    # ------------------------------------------------------------------
     if args.dataset_name is not None:
         dataset = load_dataset(
             args.dataset_name,
@@ -650,18 +690,12 @@ def main():
         )
     edited_image_column = args.edited_image_column
     if edited_image_column not in column_names:
-        raise ValueError(
-            f"--edited_image_column '{edited_image_column}' not in: {column_names}"
-        )
+        raise ValueError(f"--edited_image_column '{edited_image_column}' not in: {column_names}")
     edit_prompt_column = args.edit_prompt_column
     if edit_prompt_column not in column_names:
-        raise ValueError(
-            f"--edit_prompt_column '{edit_prompt_column}' not in: {column_names}"
-        )
+        raise ValueError(f"--edit_prompt_column '{edit_prompt_column}' not in: {column_names}")
 
-    # ------------------------------------------------------------------
     # Preprocessing
-    # ------------------------------------------------------------------
     # Spatial transforms applied to BOTH images simultaneously so they
     # receive the exact same random crop / flip.
     train_transforms = transforms.Compose(
@@ -701,19 +735,21 @@ def main():
     with accelerator.main_process_first():
         if args.max_train_samples is not None:
             dataset["train"] = (
-                dataset["train"]
-                .shuffle(seed=args.seed)
-                .select(range(args.max_train_samples))
+                dataset["train"].shuffle(seed=args.seed).select(range(args.max_train_samples))
             )
         train_dataset = dataset["train"].with_transform(preprocess_train)
 
     def collate_fn(examples):
-        original_pixel_values = torch.stack(
-            [ex["original_pixel_values"] for ex in examples]
-        ).to(memory_format=torch.contiguous_format).float()
-        edited_pixel_values = torch.stack(
-            [ex["edited_pixel_values"] for ex in examples]
-        ).to(memory_format=torch.contiguous_format).float()
+        original_pixel_values = (
+            torch.stack([ex["original_pixel_values"] for ex in examples])
+            .to(memory_format=torch.contiguous_format)
+            .float()
+        )
+        edited_pixel_values = (
+            torch.stack([ex["edited_pixel_values"] for ex in examples])
+            .to(memory_format=torch.contiguous_format)
+            .float()
+        )
         edit_prompts = [ex["edit_prompts"] for ex in examples]
         return {
             "original_pixel_values": original_pixel_values,
@@ -729,9 +765,7 @@ def main():
         num_workers=args.dataloader_num_workers,
     )
 
-    # ------------------------------------------------------------------
     # LR scheduler & Accelerator prepare
-    # ------------------------------------------------------------------
     if args.scale_lr:
         args.learning_rate = (
             args.learning_rate
@@ -741,9 +775,7 @@ def main():
         )
 
     # Compute total training steps.
-    num_update_steps_per_epoch = math.ceil(
-        len(train_dataloader) / args.gradient_accumulation_steps
-    )
+    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if args.max_train_steps is None:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
@@ -755,9 +787,7 @@ def main():
         num_training_steps=args.max_train_steps * accelerator.num_processes,
     )
 
-    # ------------------------------------------------------------------
     # torch.compile (optional)
-    # ------------------------------------------------------------------
     if args.torch_compile:
         logger.info("Compiling transformer with torch.compile (mode='default')...")
         transformer = torch.compile(transformer, mode="default")
@@ -766,13 +796,9 @@ def main():
         transformer, optimizer, train_dataloader, lr_scheduler
     )
 
-    # ------------------------------------------------------------------
     # Training state
-    # ------------------------------------------------------------------
     total_batch_size = (
-        args.train_batch_size
-        * accelerator.num_processes
-        * args.gradient_accumulation_steps
+        args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
     )
 
     logger.info("***** Running training *****")
@@ -788,9 +814,7 @@ def main():
     first_epoch = 0
     resume_step = 0
 
-    # ------------------------------------------------------------------
     # Resume from checkpoint
-    # ------------------------------------------------------------------
     if args.resume_from_checkpoint:
         if args.resume_from_checkpoint != "latest":
             path = os.path.basename(args.resume_from_checkpoint)
@@ -813,33 +837,23 @@ def main():
                 num_update_steps_per_epoch * args.gradient_accumulation_steps
             )
 
-    # ------------------------------------------------------------------
     # Init trackers
-    # ------------------------------------------------------------------
     if accelerator.is_main_process:
         tracker_config = vars(args).copy()
         accelerator.init_trackers("flux2-klein-lora-finetune", config=tracker_config)
 
-    # ------------------------------------------------------------------
     # get_sigmas helper (closure over noise_scheduler_copy)
-    # ------------------------------------------------------------------
     def get_sigmas(timesteps, n_dim=4, dtype=torch.float32):
-        sigmas = noise_scheduler_copy.sigmas.to(
-            device=accelerator.device, dtype=dtype
-        )
+        sigmas = noise_scheduler_copy.sigmas.to(device=accelerator.device, dtype=dtype)
         schedule_timesteps = noise_scheduler_copy.timesteps.to(accelerator.device)
         timesteps = timesteps.to(accelerator.device)
-        step_indices = [
-            (schedule_timesteps == t).nonzero().item() for t in timesteps
-        ]
+        step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
         sigma = sigmas[step_indices].flatten()
         while len(sigma.shape) < n_dim:
             sigma = sigma.unsqueeze(-1)
         return sigma
 
-    # ------------------------------------------------------------------
     # Training loop
-    # ------------------------------------------------------------------
     progress_bar = tqdm(
         range(0, args.max_train_steps),
         initial=global_step,
@@ -853,49 +867,35 @@ def main():
 
         for step, batch in enumerate(train_dataloader):
             # Skip already-completed steps when resuming.
-            if (
-                args.resume_from_checkpoint
-                and epoch == first_epoch
-                and step < resume_step
-            ):
+            if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
                 if step % args.gradient_accumulation_steps == 0:
                     progress_bar.update(1)
                 continue
 
             with accelerator.accumulate(transformer):
-                # ==========================================================
                 # 1. Encode BOTH images through the VAE
-                # ==========================================================
                 # Target (edited) image — the one we learn to denoise.
                 target_latents = vae.encode(
-                    batch["edited_pixel_values"].to(
-                        accelerator.device, dtype=weight_dtype
-                    )
+                    batch["edited_pixel_values"].to(accelerator.device, dtype=weight_dtype)
                 ).latent_dist.mode()
 
                 # Conditioning (original / clean) image.
                 cond_latents = vae.encode(
-                    batch["original_pixel_values"].to(
-                        accelerator.device, dtype=weight_dtype
-                    )
+                    batch["original_pixel_values"].to(accelerator.device, dtype=weight_dtype)
                 ).latent_dist.mode()
 
-                # ==========================================================
                 # 2. Patchify + batch-norm normalize both
-                # ==========================================================
                 target_latents = Flux2KleinPipeline._patchify_latents(target_latents)
                 target_latents = (target_latents - latents_bn_mean) / latents_bn_std
 
                 cond_latents = Flux2KleinPipeline._patchify_latents(cond_latents)
                 cond_latents = (cond_latents - latents_bn_mean) / latents_bn_std
 
-                # ==========================================================
                 # 3. Prepare position IDs
-                # ==========================================================
                 # Target uses T=0 (standard latent IDs).
-                target_ids = Flux2KleinPipeline._prepare_latent_ids(
-                    target_latents
-                ).to(device=accelerator.device)
+                target_ids = Flux2KleinPipeline._prepare_latent_ids(target_latents).to(
+                    device=accelerator.device
+                )
 
                 # Condition uses T=10 offset via _prepare_image_ids.
                 # This method expects a list of (1, C, H, W) tensors and
@@ -904,13 +904,11 @@ def main():
                 single_cond_ids = Flux2KleinPipeline._prepare_image_ids(
                     [cond_latents[0:1]]
                 )  # (1, N_cond, 4)
-                cond_ids = single_cond_ids.expand(
-                    cond_latents.shape[0], -1, -1
-                ).to(device=accelerator.device)
+                cond_ids = single_cond_ids.expand(cond_latents.shape[0], -1, -1).to(
+                    device=accelerator.device
+                )
 
-                # ==========================================================
                 # 4. Sample noise + flow-matching interpolation (target only)
-                # ==========================================================
                 noise = torch.randn_like(target_latents)
                 bsz = target_latents.shape[0]
 
@@ -922,12 +920,8 @@ def main():
                     logit_std=args.logit_std,
                     mode_scale=args.mode_scale,
                 )
-                indices = (
-                    u * noise_scheduler_copy.config.num_train_timesteps
-                ).long()
-                timesteps = noise_scheduler_copy.timesteps[indices].to(
-                    device=target_latents.device
-                )
+                indices = (u * noise_scheduler_copy.config.num_train_timesteps).long()
+                timesteps = noise_scheduler_copy.timesteps[indices].to(device=target_latents.device)
 
                 # Flow-matching interpolation:  zt = (1 − σ) · x₀ + σ · ε
                 sigmas = get_sigmas(
@@ -937,30 +931,18 @@ def main():
                 )
                 noisy_target = (1.0 - sigmas) * target_latents + sigmas * noise
 
-                # ==========================================================
                 # 5. Pack to sequences
-                # ==========================================================
                 packed_noisy_target = Flux2KleinPipeline._pack_latents(
                     noisy_target
                 )  # (B, N_target, C)
-                packed_cond = Flux2KleinPipeline._pack_latents(
-                    cond_latents
-                )  # (B, N_cond, C)
+                packed_cond = Flux2KleinPipeline._pack_latents(cond_latents)  # (B, N_cond, C)
 
-                # ==========================================================
                 # 6. Encode text prompts
-                # ==========================================================
-                prompt_embeds, text_ids = compute_text_embeddings(
-                    batch["edit_prompts"]
-                )
-                prompt_embeds = prompt_embeds.to(
-                    device=accelerator.device, dtype=weight_dtype
-                )
+                prompt_embeds, text_ids = compute_text_embeddings(batch["edit_prompts"])
+                prompt_embeds = prompt_embeds.to(device=accelerator.device, dtype=weight_dtype)
                 text_ids = text_ids.to(device=accelerator.device)
 
-                # ==========================================================
                 # 7. Conditioning dropout (classifier-free guidance training)
-                # ==========================================================
                 if args.conditioning_dropout_prob is not None:
                     random_p = torch.rand(bsz, device=accelerator.device)
                     prob = args.conditioning_dropout_prob
@@ -982,28 +964,18 @@ def main():
                     if image_drop.any():
                         packed_cond[image_drop] = 0.0
 
-                # ==========================================================
                 # 8. Concatenate along sequence dimension
-                # ==========================================================
-                hidden_states = torch.cat(
-                    [packed_noisy_target, packed_cond], dim=1
-                )
+                hidden_states = torch.cat([packed_noisy_target, packed_cond], dim=1)
                 img_ids = torch.cat([target_ids, cond_ids], dim=1)
 
-                # ==========================================================
                 # 9. Handle guidance embedding
-                # ==========================================================
                 if unwrap_model(transformer).config.guidance_embeds:
-                    guidance = torch.full(
-                        [1], args.guidance_scale, device=accelerator.device
-                    )
+                    guidance = torch.full([1], args.guidance_scale, device=accelerator.device)
                     guidance = guidance.expand(bsz)
                 else:
                     guidance = None
 
-                # ==========================================================
                 # 10. Transformer forward pass
-                # ==========================================================
                 model_pred = transformer(
                     hidden_states=hidden_states,
                     timestep=timesteps / 1000,
@@ -1014,19 +986,13 @@ def main():
                     return_dict=False,
                 )[0]
 
-                # ==========================================================
                 # 11. Keep ONLY the target portion of the prediction
-                # ==========================================================
                 model_pred = model_pred[:, : packed_noisy_target.size(1)]
 
                 # Unpack back to spatial layout for loss computation.
-                model_pred = Flux2KleinPipeline._unpack_latents_with_ids(
-                    model_pred, target_ids
-                )
+                model_pred = Flux2KleinPipeline._unpack_latents_with_ids(model_pred, target_ids)
 
-                # ==========================================================
                 # 12. Flow-matching loss
-                # ==========================================================
                 weighting = compute_loss_weighting_for_sd3(
                     weighting_scheme=args.weighting_scheme, sigmas=sigmas
                 )
@@ -1035,26 +1001,21 @@ def main():
                 target = noise - target_latents
 
                 loss = torch.mean(
-                    (
-                        weighting.float()
-                        * (model_pred.float() - target.float()) ** 2
-                    ).reshape(target.shape[0], -1),
+                    (weighting.float() * (model_pred.float() - target.float()) ** 2).reshape(
+                        target.shape[0], -1
+                    ),
                     1,
                 )
                 loss = loss.mean()
 
                 # Gather losses for logging.
-                avg_loss = accelerator.gather(
-                    loss.repeat(args.train_batch_size)
-                ).mean()
+                avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
                 train_loss += avg_loss.item() / args.gradient_accumulation_steps
 
                 # Backpropagation.
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
-                    accelerator.clip_grad_norm_(
-                        transformer.parameters(), args.max_grad_norm
-                    )
+                    accelerator.clip_grad_norm_(transformer.parameters(), args.max_grad_norm)
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
@@ -1071,26 +1032,16 @@ def main():
                     if accelerator.is_main_process:
                         if args.checkpoints_total_limit is not None:
                             checkpoints = os.listdir(args.output_dir)
-                            checkpoints = [
-                                d for d in checkpoints if d.startswith("checkpoint")
-                            ]
-                            checkpoints = sorted(
-                                checkpoints, key=lambda x: int(x.split("-")[1])
-                            )
+                            checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
+                            checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
                             if len(checkpoints) >= args.checkpoints_total_limit:
-                                num_to_remove = (
-                                    len(checkpoints) - args.checkpoints_total_limit + 1
-                                )
+                                num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
                                 for removing in checkpoints[:num_to_remove]:
-                                    path_to_remove = os.path.join(
-                                        args.output_dir, removing
-                                    )
+                                    path_to_remove = os.path.join(args.output_dir, removing)
                                     logger.info(f"Removing checkpoint: {path_to_remove}")
                                     shutil.rmtree(path_to_remove)
 
-                        save_path = os.path.join(
-                            args.output_dir, f"checkpoint-{global_step}"
-                        )
+                        save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                         accelerator.save_state(save_path)
                         logger.info(f"Saved state to {save_path}")
 
@@ -1103,9 +1054,7 @@ def main():
             if global_step >= args.max_train_steps:
                 break
 
-        # ==============================================================
         # End-of-epoch validation
-        # ==============================================================
         if accelerator.is_main_process:
             if (
                 args.validation_prompt is not None
@@ -1128,9 +1077,7 @@ def main():
                     weight_dtype,
                 )
 
-    # ==================================================================
     # Save final LoRA weights
-    # ==================================================================
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         transformer_model = unwrap_model(transformer)
