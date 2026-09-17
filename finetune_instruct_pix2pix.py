@@ -14,7 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Script to fine-tune InstructPix2Pix."""
+"""Script to fine-tune InstructPix2Pix.]
+
+Adapted from huggingface/instruction-tuned-sd ``train_instruct_pix2pix.py``.
+
+"""
 
 import os
 import argparse
@@ -1151,10 +1155,6 @@ def main():
                 # run inference
                 original_image = download_image(args.val_image_url)
                 edited_images = []
-                # with torch.autocast(
-                #    str(accelerator.device),
-                #    enabled=accelerator.mixed_precision == "fp16",
-                # ):
                 with torch.autocast(
                     str(accelerator.device),
                     dtype=weight_dtype,
