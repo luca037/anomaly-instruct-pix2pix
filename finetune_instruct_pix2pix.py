@@ -70,12 +70,13 @@ DATASET_NAME_MAPPING = {
 WANDB_TABLE_COL_NAMES = ["original_image", "edited_image", "edit_prompt"]
 
 
-# ---------------------------------------------------------------------------
 # CLI Arguments
-# ---------------------------------------------------------------------------
-
-
 def parse_args():
+    """Parses command-line arguments for InstructPix2Pix fine-tuning.
+
+    Returns:
+        Parsed arguments namespace with all training hyperparameters.
+    """
     parser = argparse.ArgumentParser(
         description="Simple example of a training script for InstructPix2Pix."
     )
@@ -432,6 +433,17 @@ def parse_args():
 def get_full_repo_name(
     model_id: str, organization: Optional[str] = None, token: Optional[str] = None
 ):
+    """Resolves the full Hub repository name for pushing.
+
+    Args:
+        model_id: Short model identifier.
+        organization: Optional organization name.
+        token: Hugging Face token for username lookup.
+
+    Returns:
+        Full repository name as "username/model_id" or
+        "organization/model_id".
+    """
     if token is None:
         token = HfFolder.get_token()
     if organization is None:
@@ -441,19 +453,32 @@ def get_full_repo_name(
         return f"{organization}/{model_id}"
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
-
-
 def convert_to_np(image, resolution):
-    """Resize a PIL image and convert to CHW numpy array."""
+    """Converts a PIL image to a CHW numpy array at the given resolution.
+
+    Args:
+        image: Input PIL image.
+        resolution: Target square size.
+
+    Returns:
+        Numpy array with shape (3, resolution, resolution).
+    """
     image = image.convert("RGB").resize((resolution, resolution))
     return np.array(image).transpose(2, 0, 1)
 
 
 def download_image(url_or_path):
-    """Load an image from a URL or local path, applying EXIF orientation."""
+    """Loads an image from a URL or local path.
+
+    Handles HTTP(S) URLs and applies EXIF orientation.
+
+    Args:
+        url_or_path: Remote URL or local file path.
+
+    Returns:
+        PIL image in RGB mode.
+    """
     if url_or_path.startswith("http://") or url_or_path.startswith("https://"):
         image = PIL.Image.open(requests.get(url_or_path, stream=True).raw)
     else:
@@ -463,17 +488,12 @@ def download_image(url_or_path):
     return image
 
 
-# ---------------------------------------------------------------------------
 # Main
-# ---------------------------------------------------------------------------
-
-
 def main():
+    """Runs fine-tuning for InstructPix2Pix."""
     args = parse_args()
 
-    # ------------------------------------------------------------------
     # Accelerator
-    # ------------------------------------------------------------------
     if args.non_ema_revision is not None:
         deprecate(
             "non_ema_revision!=None",
@@ -584,7 +604,8 @@ def main():
             xformers_version = version.parse(xformers.__version__)
             if xformers_version == version.parse("0.0.16"):
                 logger.warn(
-                    "xFormers 0.0.16 cannot be used for training in some GPUs. If you observe problems during training, please update xFormers to at least 0.0.17. See https://huggingface.co/docs/diffusers/main/en/optimization/xformers for more details."
+                    "xFormers 0.0.16 cannot be used for training in some GPUs. If you observe problems during training,"
+                    "please update xFormers to at least 0.0.17. See https://huggingface.co/docs/diffusers/main/en/optimization/xformers for more details."
                 )
             unet.enable_xformers_memory_efficient_attention()
         else:
@@ -697,6 +718,14 @@ def main():
 
             # 2. Prepend the directory path so Python knows exactly where the files are
             def make_absolute_paths(example):
+                """Converts relative image paths in a row to absolute paths.
+
+                Args:
+                    example: Single dataset row with relative paths.
+
+                Returns:
+                    The same row with absolute paths.
+                """
                 example[args.original_image_column] = os.path.join(
                     args.train_data_dir, example[args.original_image_column]
                 )
@@ -749,6 +778,14 @@ def main():
     # Preprocessing the datasets.
     # We need to tokenize input captions and transform the images.
     def tokenize_captions(captions):
+        """Tokenizes a batch of edit prompts.
+
+        Args:
+            captions: List of text prompts.
+
+        Returns:
+            Tensor of token ids with shape (batch, seq_len).
+        """
         inputs = tokenizer(
             captions,
             max_length=tokenizer.model_max_length,
@@ -758,7 +795,7 @@ def main():
         )
         return inputs.input_ids
 
-    # Preprocessing the datasets.
+    # Spatial transforms applied identically to the pair via channel concat.
     train_transforms = transforms.Compose(
         [
             transforms.CenterCrop(args.resolution)
@@ -771,47 +808,70 @@ def main():
     )
 
     def preprocess_images(examples):
+        """Converts PIL images to tensors and applies shared augmentation.
+
+        The pair is concatenated along the channel-batch axis before the
+        transform so the same random crop and flip is applied to both.
+
+        Args:
+            examples: Batch dict with lists of PIL images for original and
+                edited.
+
+        Returns:
+            Tensor of shape (2*batch*3, H, W) in range [-1, 1] after transform.
+        """
         original_images = np.concatenate(
             [convert_to_np(image, args.resolution) for image in examples[original_image_column]]
         )
         edited_images = np.concatenate(
             [convert_to_np(image, args.resolution) for image in examples[edited_image_column]]
         )
-        # We need to ensure that the original and the edited images undergo the same
-        # augmentation transforms.
+        # Concatenate along channel-batch axis so the same crop/flip is shared.
         images = np.concatenate([original_images, edited_images])
         images = torch.tensor(images)
         images = 2 * (images / 255) - 1
         return train_transforms(images)
 
     def preprocess_train(examples):
-        # Preprocess images.
+        """Prepares a single training example from the raw batch.
+
+        Splits the shared augmentation back into two images, stores them as
+        pixel values, and tokenizes the edit prompt.
+
+        Args:
+            examples: Batch dict from the dataset.
+
+        Returns:
+            The same batch dict augmented with pixel values and input_ids.
+        """
         preprocessed_images = preprocess_images(examples)
-        # Since the original and edited images were concatenated before
-        # applying the transformations, we need to separate them and reshape
-        # them accordingly.
+        # Split the shared transform back into the two images.
         original_images, edited_images = preprocessed_images.chunk(2)
         original_images = original_images.reshape(-1, 3, args.resolution, args.resolution)
         edited_images = edited_images.reshape(-1, 3, args.resolution, args.resolution)
-
-        # Collate the preprocessed images into the `examples`.
         examples["original_pixel_values"] = original_images
         examples["edited_pixel_values"] = edited_images
-
-        # Preprocess the captions.
         captions = [caption for caption in examples[edit_prompt_column]]
         examples["input_ids"] = tokenize_captions(captions)
         return examples
 
+    # Attach preprocessing to the dataset under main_process_first.
     with accelerator.main_process_first():
         if args.max_train_samples is not None:
             dataset["train"] = (
                 dataset["train"].shuffle(seed=args.seed).select(range(args.max_train_samples))
             )
-        # Set the training transforms
         train_dataset = dataset["train"].with_transform(preprocess_train)
 
     def collate_fn(examples):
+        """Collates a list of examples into a single batch.
+
+        Args:
+            examples: List of dicts returned by the dataset transform.
+
+        Returns:
+            Dict with stacked original and edited pixel values and input_ids.
+        """
         original_pixel_values = torch.stack(
             [example["original_pixel_values"] for example in examples]
         )
@@ -936,9 +996,7 @@ def main():
     )
     progress_bar.set_description("Steps")
 
-    # ------------------------------------------------------------------
     # Training loop
-    # ------------------------------------------------------------------
     for epoch in range(first_epoch, args.num_train_epochs):
         unet.train()
         train_loss = 0.0
@@ -950,17 +1008,13 @@ def main():
                 continue
 
             with accelerator.accumulate(unet):
-                # ==========================================================
                 # 1. Encode edited image to latents
-                # ==========================================================
                 latents = vae.encode(
                     batch["edited_pixel_values"].to(weight_dtype)
                 ).latent_dist.sample()
                 latents = latents * vae.config.scaling_factor
 
-                # ==========================================================
                 # 2. Sample noise + timesteps
-                # ==========================================================
                 noise = torch.randn_like(latents)
                 bsz = latents.shape[0]
                 timesteps = torch.randint(
@@ -971,26 +1025,18 @@ def main():
                 )
                 timesteps = timesteps.long()
 
-                # ==========================================================
                 # 3. Add noise to latents (forward diffusion)
-                # ==========================================================
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
-                # ==========================================================
                 # 4. Encode text prompt
-                # ==========================================================
                 encoder_hidden_states = text_encoder(batch["input_ids"])[0]
 
-                # ==========================================================
                 # 5. Encode conditioning original image
-                # ==========================================================
                 original_image_embeds = vae.encode(
                     batch["original_pixel_values"].to(weight_dtype)
                 ).latent_dist.mode()
 
-                # ==========================================================
                 # 6. Conditioning dropout (CFG training)
-                # ==========================================================
                 # Conditioning dropout to support classifier-free guidance during inference. For more details
                 # check out the section 3.2.1 of the original paper https://arxiv.org/abs/2211.09800.
                 if args.conditioning_dropout_prob is not None:
@@ -1016,16 +1062,12 @@ def main():
                     # Final image conditioning.
                     original_image_embeds = image_mask * original_image_embeds
 
-                # ==========================================================
                 # 7. Concatenate conditioning (ip2p: 8 channels)
-                # ==========================================================
                 concatenated_noisy_latents = torch.cat(
                     [noisy_latents, original_image_embeds], dim=1
                 )
 
-                # ==========================================================
                 # 8. Get target (epsilon / v_prediction)
-                # ==========================================================
                 if noise_scheduler.config.prediction_type == "epsilon":
                     target = noise
                 elif noise_scheduler.config.prediction_type == "v_prediction":
@@ -1035,9 +1077,7 @@ def main():
                         f"Unknown prediction type {noise_scheduler.config.prediction_type}"
                     )
 
-                # ==========================================================
                 # 9. UNet forward + MSE loss
-                # ==========================================================
                 model_pred = unet(
                     concatenated_noisy_latents, timesteps, encoder_hidden_states
                 ).sample
@@ -1079,9 +1119,7 @@ def main():
             if global_step >= args.max_train_steps:
                 break
 
-        # ==============================================================
         # End-of-epoch validation
-        # ==============================================================
         if accelerator.is_main_process:
             if (
                 (args.val_image_url is not None)
@@ -1151,9 +1189,7 @@ def main():
                 del pipeline
                 torch.cuda.empty_cache()
 
-    # ==================================================================
     # Save final pipeline
-    # ==================================================================
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         unet = accelerator.unwrap_model(unet)

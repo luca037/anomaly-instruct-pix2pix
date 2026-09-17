@@ -58,13 +58,15 @@ logger = get_logger(__name__, log_level="INFO")
 
 WANDB_TABLE_COL_NAMES = ["original_image", "winner_image", "edit_prompt"]
 
-
-# ---------------------------------------------------------------------------
-# CLI Arguments
-# ---------------------------------------------------------------------------
+# CLI Arguments.
 
 
 def parse_args():
+    """Parses command-line arguments for DPO alignment.
+
+    Returns:
+        Parsed arguments namespace.
+    """
     parser = argparse.ArgumentParser(description="DPO alignment for InstructPix2Pix.")
     parser.add_argument(
         "--pretrained_model_name_or_path",
@@ -197,6 +199,16 @@ def parse_args():
 def get_full_repo_name(
     model_id: str, organization: Optional[str] = None, token: Optional[str] = None
 ):
+    """Resolves the full Hub repository name for pushing.
+
+    Args:
+        model_id: Short model identifier.
+        organization: Optional organization name.
+        token: HF token for username lookup.
+
+    Returns:
+        Full repo name as "username/model_id" or "organization/model_id".
+    """
     from huggingface_hub import HfFolder
 
     try:
@@ -215,17 +227,34 @@ def get_full_repo_name(
         return f"{organization}/{model_id}"
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# Helpers.
 
 
 def convert_to_np(image, resolution):
+    """Converts a PIL image to a CHW numpy array at the given resolution.
+
+    Args:
+        image: Input PIL image.
+        resolution: Target square size.
+
+    Returns:
+        Numpy array with shape (3, resolution, resolution).
+    """
     image = image.convert("RGB").resize((resolution, resolution))
     return np.array(image).transpose(2, 0, 1)
 
 
 def download_image(url_or_path):
+    """Loads an image from a URL or local path.
+
+    Handles HTTP(S) URLs and applies EXIF orientation.
+
+    Args:
+        url_or_path: Remote URL or local file path.
+
+    Returns:
+        PIL image in RGB mode.
+    """
     if url_or_path.startswith("http://") or url_or_path.startswith("https://"):
         image = PIL.Image.open(requests.get(url_or_path, stream=True).raw)
     else:
@@ -235,12 +264,11 @@ def download_image(url_or_path):
     return image
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+# Main.
 
 
 def main():
+    """Runs DPO alignment for InstructPix2Pix."""
     args = parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -250,6 +278,9 @@ def main():
     if args.non_ema_revision is None:
         args.non_ema_revision = args.revision
 
+    # Accelerator & logging
+    #   Sets up Accelerate (DDP, gradient accumulation, mixed precision) and
+    #   the logging directory. The same seed is used across processes.
     logging_dir = os.path.join(args.output_dir, args.logging_dir)
     accelerator_project_config = ProjectConfiguration(
         total_limit=args.checkpoints_total_limit, logging_dir=logging_dir
@@ -305,6 +336,10 @@ def main():
         elif args.output_dir is not None:
             os.makedirs(args.output_dir, exist_ok=True)
 
+    # Load pretrained models
+    #   All three encoders + both UNets are initialised from the SAME SFT
+    #   checkpoint (--pretrained_model_name_or_path). ref_unet is the frozen
+    #   reference policy for the DPO KL term; unet (p_theta) is trained.
     noise_scheduler = DDPMScheduler.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="scheduler"
     )
@@ -324,6 +359,7 @@ def main():
         args.pretrained_model_name_or_path, subfolder="unet", revision=args.non_ema_revision
     )
 
+    # Freeze base encoders and the reference policy — only p_theta is updated.
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
     ref_unet.requires_grad_(False)
@@ -397,6 +433,10 @@ def main():
         fused=fused_available,
     )
 
+    # Dataset
+    #   Preference triples (original, winner, loser) + edit_prompt.
+    #   Paths in metadata.jsonl are relative to train_data_dir; we make
+    #   them absolute and cast to HF Image type for lazy loading.
     if args.dataset_name is not None:
         dataset = load_dataset(
             args.dataset_name, args.dataset_config_name, cache_dir=args.cache_dir
@@ -408,6 +448,14 @@ def main():
         )
 
         def make_absolute_paths(example):
+            """Converts relative image paths in a row to absolute paths.
+
+            Args:
+                example: Single dataset row with relative paths.
+
+            Returns:
+                The same row with absolute paths for all three image columns.
+            """
             for col in [
                 args.original_image_column,
                 args.winner_image_column,
@@ -423,9 +471,18 @@ def main():
         dataset = dataset.cast_column(args.winner_image_column, HFImage())
         dataset = dataset.cast_column(args.loser_image_column, HFImage())
 
+    # Validate that the expected columns are present.
     dataset["train"].column_names
 
     def tokenize_captions(captions):
+        """Tokenizes a batch of edit prompts.
+
+        Args:
+            captions: List of text prompts.
+
+        Returns:
+            Tensor of token ids with shape (batch, seq_len).
+        """
         inputs = tokenizer(
             captions,
             max_length=tokenizer.model_max_length,
@@ -435,6 +492,8 @@ def main():
         )
         return inputs.input_ids
 
+    # Spatial transforms applied identically to the triplet. Center crop is
+    # deterministic, random crop adds augmentation; horizontal flip is optional.
     train_transforms = transforms.Compose(
         [
             transforms.CenterCrop(args.resolution)
@@ -447,7 +506,18 @@ def main():
     )
 
     def preprocess_images(examples):
-        # Synchronized augmentation for (original, winner, loser) via channel concat trick
+        """Converts PIL images to tensors and applies shared augmentation.
+
+        The triplet is concatenated along the channel-batch axis before the
+        transform so the same random crop and flip is applied to all three.
+
+        Args:
+            examples: Batch dict with lists of PIL images for original, winner,
+                and loser.
+
+        Returns:
+            Tensor of shape (3*batch*3, H, W) in range [-1, 1] after transform.
+        """
         original = np.concatenate(
             [convert_to_np(im, args.resolution) for im in examples[args.original_image_column]]
         )
@@ -457,13 +527,26 @@ def main():
         loser = np.concatenate(
             [convert_to_np(im, args.resolution) for im in examples[args.loser_image_column]]
         )
+        # Concatenate along channel-batch axis so the same crop/flip is shared.
         images = np.concatenate([original, winner, loser])
         images = torch.tensor(images)
         images = 2 * (images / 255) - 1
         return train_transforms(images)
 
     def preprocess_train(examples):
+        """Prepares a single training example from the raw batch.
+
+        Splits the shared augmentation back into three images, stores them as
+        pixel values, and tokenizes the edit prompt.
+
+        Args:
+            examples: Batch dict from the dataset.
+
+        Returns:
+            The same batch dict augmented with pixel values and input_ids.
+        """
         preprocessed = preprocess_images(examples)
+        # Split the shared transform back into the three images.
         original_images, winner_images, loser_images = preprocessed.chunk(3)
         original_images = original_images.reshape(-1, 3, args.resolution, args.resolution)
         winner_images = winner_images.reshape(-1, 3, args.resolution, args.resolution)
@@ -475,6 +558,8 @@ def main():
         examples["input_ids"] = tokenize_captions(captions)
         return examples
 
+    # Attach the preprocessing to the dataset. This is done under
+    # main_process_first to avoid race conditions in distributed setups.
     with accelerator.main_process_first():
         if args.max_train_samples is not None:
             dataset["train"] = (
@@ -483,6 +568,14 @@ def main():
         train_dataset = dataset["train"].with_transform(preprocess_train)
 
     def collate_fn(examples):
+        """Collates a list of examples into a single batch.
+
+        Args:
+            examples: List of dicts returned by the dataset transform.
+
+        Returns:
+            Dict with stacked original, winner, loser pixel values and input_ids.
+        """
         original_pixel_values = (
             torch.stack([e["original_pixel_values"] for e in examples])
             .to(memory_format=torch.contiguous_format)
@@ -506,6 +599,7 @@ def main():
             "input_ids": input_ids,
         }
 
+    # Build the DataLoader for the preference dataset.
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         shuffle=True,
@@ -514,6 +608,7 @@ def main():
         num_workers=args.dataloader_num_workers,
     )
 
+    # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if args.max_train_steps is None:
@@ -531,28 +626,37 @@ def main():
         unet = torch.compile(unet, mode="default")
         ref_unet = torch.compile(ref_unet, mode="default")
 
+    # Prepare everything with our `accelerator`.
     unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         unet, optimizer, train_dataloader, lr_scheduler
     )
 
+    # For mixed precision training we cast the text_encoder and vae weights to half-precision
+    # as these models are only used for inference, keeping weights in full precision is not required.
     weight_dtype = torch.float32
     if accelerator.mixed_precision == "fp16":
         weight_dtype = torch.float16
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
 
+    # Move text_encode, vae and ref_unet to gpu and cast to weight_dtype
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
     ref_unet.to(accelerator.device, dtype=weight_dtype)
 
+    # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     if overrode_max_train_steps:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
+    # Afterwards we recalculate our number of training epochs
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
+    # We need to initialize the trackers we use, and also store our configuration.
+    # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
         accelerator.init_trackers("instruct-pix2pix-dpo", config=vars(args))
 
+    # Train!
     total_batch_size = (
         args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
     )
@@ -567,10 +671,12 @@ def main():
     global_step = 0
     first_epoch = 0
 
+    # Potentially load in the weights and states from a previous save
     if args.resume_from_checkpoint:
         if args.resume_from_checkpoint != "latest":
             path = os.path.basename(args.resume_from_checkpoint)
         else:
+            # Get the most recent checkpoint
             dirs = os.listdir(args.output_dir)
             dirs = [d for d in dirs if d.startswith("checkpoint")]
             dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
@@ -590,28 +696,26 @@ def main():
                 num_update_steps_per_epoch * args.gradient_accumulation_steps
             )
 
+    # Only show the progress bar once on each machine.
     progress_bar = tqdm(
         range(global_step, args.max_train_steps), disable=not accelerator.is_local_main_process
     )
     progress_bar.set_description("Steps")
 
-    # ------------------------------------------------------------------
     # Training loop
-    # ------------------------------------------------------------------
     for epoch in range(first_epoch, args.num_train_epochs):
         unet.train()
         train_loss = 0.0
         implicit_acc_accumulated = 0.0
         for step, batch in enumerate(train_dataloader):
+            # Skip steps until we reach the resumed step
             if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
                 if step % args.gradient_accumulation_steps == 0:
                     progress_bar.update(1)
                 continue
 
             with accelerator.accumulate(unet):
-                # ==========================================================
                 # 1. Encode winner / loser to latents + original to cond
-                # ==========================================================
                 winner_latents = (
                     vae.encode(batch["winner_pixel_values"].to(weight_dtype)).latent_dist.sample()
                     * vae.config.scaling_factor
@@ -624,9 +728,7 @@ def main():
                     batch["original_pixel_values"].to(weight_dtype)
                 ).latent_dist.mode()
 
-                # ==========================================================
                 # 2. Sample shared timesteps + noise per preference pair
-                # ==========================================================
                 bsz = winner_latents.shape[0]
                 timesteps = torch.randint(
                     0, noise_scheduler.num_train_timesteps, (bsz,), device=winner_latents.device
@@ -636,20 +738,14 @@ def main():
                 timesteps_w = timesteps
                 timesteps_l = timesteps
 
-                # ==========================================================
                 # 3. Add noise to latents (forward diffusion)
-                # ==========================================================
                 noisy_winner = noise_scheduler.add_noise(winner_latents, noise, timesteps_w)
                 noisy_loser = noise_scheduler.add_noise(loser_latents, noise_l, timesteps_l)
 
-                # ==========================================================
                 # 4. Encode text prompt
-                # ==========================================================
                 encoder_hidden_states = text_encoder(batch["input_ids"])[0]
 
-                # ==========================================================
                 # 5. Concatenate conditioning image (ip2p: 8 channels)
-                # ==========================================================
                 concat_winner = torch.cat([noisy_winner, original_embeds], dim=1)
                 concat_loser = torch.cat([noisy_loser, original_embeds], dim=1)
                 concat_all = torch.cat([concat_winner, concat_loser], dim=0)
@@ -659,14 +755,10 @@ def main():
                 )
                 target_all = torch.cat([noise, noise_l], dim=0)
 
-                # ==========================================================
                 # 6. UNet forward (policy)
-                # ==========================================================
                 model_pred = unet(concat_all, timesteps_all, encoder_hidden_states_all).sample
 
-                # ==========================================================
                 # 7. DPO loss (Diffusion-DPO)
-                # ==========================================================
                 model_losses = (model_pred - target_all).pow(2).mean(dim=[1, 2, 3])
                 model_losses_w, model_losses_l = model_losses.chunk(2)
                 model_diff = model_losses_w - model_losses_l
@@ -681,11 +773,16 @@ def main():
                     ref_diff = ref_losses_w - ref_losses_l
                     raw_ref_loss = ref_losses.mean()
 
+                # Compute the DPO contrast. Beta controls the KL penalty to
+                # the reference; a larger beta keeps the policy closer to p_ref.
                 scale_term = -0.5 * args.beta_dpo
                 inside_term = scale_term * (model_diff - ref_diff)
+                # Implicit accuracy is the fraction of pairs where the policy
+                # already prefers the winner (inside_term > 0).
                 implicit_acc = (inside_term > 0).sum().float() / inside_term.size(0)
                 loss = -F.logsigmoid(inside_term).mean()
 
+                # Gather and accumulate metrics for logging.
                 avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
                 train_loss += avg_loss.item() / args.gradient_accumulation_steps
                 avg_model_mse = (
@@ -697,6 +794,8 @@ def main():
                 avg_acc = accelerator.gather(implicit_acc).mean().item()
                 implicit_acc_accumulated += avg_acc / args.gradient_accumulation_steps
 
+                # Backpropagate and update the policy. Gradients are clipped
+                # on sync to keep training stable.
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
                     accelerator.clip_grad_norm_(unet.parameters(), args.max_grad_norm)
@@ -704,9 +803,13 @@ def main():
                 lr_scheduler.step()
                 optimizer.zero_grad()
 
+            # Checks if the accelerator has performed an optimization step behind the scenes
+            # Sync and log. Only the main process updates the progress bar
+            # and writes to trackers; gradients are already reduced.
             if accelerator.sync_gradients:
                 progress_bar.update(1)
                 global_step += 1
+                # Log the averaged training loss and MSEs for monitoring.
                 accelerator.log(
                     {
                         "train_loss": train_loss,
@@ -719,6 +822,7 @@ def main():
                 train_loss = 0.0
                 implicit_acc_accumulated = 0.0
 
+                # Save a checkpoint periodically for resuming.
                 if global_step % args.checkpointing_steps == 0 and accelerator.is_main_process:
                     save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                     accelerator.save_state(save_path)
@@ -734,9 +838,7 @@ def main():
             if global_step >= args.max_train_steps:
                 break
 
-        # ==============================================================
         # End-of-epoch validation
-        # ==============================================================
         if (
             accelerator.is_main_process
             and args.val_image_url is not None
@@ -789,9 +891,7 @@ def main():
             del pipeline
             torch.cuda.empty_cache()
 
-    # ==================================================================
     # Save final pipeline
-    # ==================================================================
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         unet = accelerator.unwrap_model(unet)
