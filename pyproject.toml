@@ -1,0 +1,26 @@
+[project]
+name = "my-project"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "accelerate>=1.13.0",
+    "bitsandbytes>=0.49.2",
+    "black~=23.1",
+    "datasets>=5.0.0",
+    "diffusers>=0.38.0",
+    "invisible-watermark>=0.2.0",
+    "isort>=5.5.4",
+    "matplotlib>=3.10.9",
+    "numpy>=2.2.6",
+    "open-clip-torch>=3.3.0",
+    "openai>=2.45.0",
+    "opencv-python>=5.0.0.93",
+    "peft>=0.19.1",
+    "ruff>=0.0.241,<=0.0.259",
+    "safetensors>=0.8.0",
+    "scipy>=1.15.3",
+    "torch>=2.12.0",
+    "torchvision>=0.27.0",
+    "transformers>=5.11.0",
+    "wandb>=0.28.0",
+]
