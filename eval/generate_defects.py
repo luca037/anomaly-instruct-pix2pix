@@ -32,9 +32,9 @@ import json
 import os
 import sys
 
-import torch
 import cv2
 import numpy as np
+import torch
 from PIL import Image
 from tqdm import tqdm
 
@@ -53,8 +53,15 @@ except ImportError:
 
 MVTEC_ROOT = "/home/luca_piai/big_disk/datasets/mvtec"
 
+# CLI arguments.
+
 
 def parse_args():
+    """Parses command-line arguments.
+
+    Returns:
+        Parsed arguments namespace.
+    """
     parser = argparse.ArgumentParser(
         description="Generate synthetic defect images with a fine-tuned ip2p model."
     )
@@ -111,7 +118,19 @@ def parse_args():
     return parser.parse_args()
 
 
+# Helpers.
+
+
 def list_clean_images(mvtec_path, object_name):
+    """Lists clean MVTec good images for an object.
+
+    Args:
+        mvtec_path: Root of the MVTec dataset.
+        object_name: Category name.
+
+    Returns:
+        Sorted list of absolute paths to ``train/good`` images.
+    """
     good_dir = os.path.join(mvtec_path, object_name, "train", "good")
     if not os.path.isdir(good_dir):
         return []
@@ -123,25 +142,40 @@ def list_clean_images(mvtec_path, object_name):
 
 
 def compute_defect_mask(input_path, generated_pil):
-    """Binary defect mask (PIL 'L', uint8 0/255) via Otsu on the diff.
+    """Computes a binary defect mask via Otsu on the image difference.
 
-    Mirrors the heatmap in ``generate.py``: the difference is the mean
-    absolute pixel change over RGB channels between the generated image and
-    the (resized to 512x512) input, normalized to [0, 1]. Otsu's method then
-    binarizes that diff into a foreground-defect mask.
+    Mirrors the heatmap in ``generate.py``: the mean absolute pixel change
+    over RGB channels between the 512x512 input and generated images is
+    thresholded with Otsu.
+
+    Args:
+        input_path: Path to the clean input image.
+        generated_pil: Generated PIL image.
+
+    Returns:
+        Binary PIL image (mode L, 0/255) with the defect mask.
     """
     input_img = Image.open(input_path).convert("RGB").resize((512, 512))
     gen_img = generated_pil.convert("RGB").resize((512, 512))
     input_np = np.array(input_img, dtype=np.float32) / 255.0
     gen_np = np.array(gen_img, dtype=np.float32) / 255.0
-    diff = np.abs(gen_np - input_np).mean(axis=2)  # (512, 512) in [0, 1]
+    diff = np.abs(gen_np - input_np).mean(axis=2)
     diff_uint8 = np.clip(diff * 255.0, 0, 255).astype(np.uint8)
     _, mask = cv2.threshold(diff_uint8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return Image.fromarray(mask, mode="L")
 
 
 def _resume_start(out_dir, num_images):
-    """Return ``(start_idx, n_new)`` so a re-run continues after the highest existing index."""
+    """Computes the resume index for an existing output folder.
+
+    Args:
+        out_dir: Output directory for a defect type.
+        num_images: Target number of images.
+
+    Returns:
+        Tuple ``(start_idx, n_new)`` where ``start_idx`` is the first index
+        to generate and ``n_new`` is the number of new images needed.
+    """
     existing_idx = [
         int(os.path.splitext(f)[0])
         for f in os.listdir(out_dir)
@@ -154,9 +188,25 @@ def _resume_start(out_dir, num_images):
     return start_idx, n_new
 
 
-def _generate_one_defect(pipe, prompt_embeds, neg_embeds, clean_images, out_dir, mask_dir, indices, batch_size, no_mask):
-    """Run the pipeline in batches for one <object>/<defect> and write images/masks."""
-    for b_start in tqdm(range(0, len(indices), batch_size), desc=os.path.basename(out_dir), leave=False):
+def _generate_one_defect(
+    pipe, prompt_embeds, neg_embeds, clean_images, out_dir, mask_dir, indices, batch_size, no_mask
+):
+    """Runs the pipeline in batches for one defect type.
+
+    Args:
+        pipe: Diffusion pipeline.
+        prompt_embeds: Precomputed positive prompt embeddings.
+        neg_embeds: Precomputed negative prompt embeddings.
+        clean_images: List of clean image paths to cycle through.
+        out_dir: Output directory for images.
+        mask_dir: Output directory for masks.
+        indices: List of indices to generate.
+        batch_size: Batch size for pipeline calls.
+        no_mask: Whether to skip mask generation.
+    """
+    for b_start in tqdm(
+        range(0, len(indices), batch_size), desc=os.path.basename(out_dir), leave=False
+    ):
         batch_idx = indices[b_start : b_start + batch_size]
         B = len(batch_idx)
         clean_paths = [clean_images[i % len(clean_images)] for i in batch_idx]
@@ -176,7 +226,17 @@ def _generate_one_defect(pipe, prompt_embeds, neg_embeds, clean_images, out_dir,
 
 
 def _apply_torch_compile(pipe):
-    """Compile the heavy pipeline components with ``torch.compile``."""
+    """Compiles the heavy pipeline components with ``torch.compile``.
+
+    Each component is wrapped defensively so a failure on one does not abort
+    the whole run.
+
+    Args:
+        pipe: Diffusion pipeline.
+
+    Returns:
+        The pipeline with compiled components.
+    """
     for comp_name in ("unet", "vae"):
         comp = getattr(pipe, comp_name, None)
         if comp is None:
@@ -185,12 +245,23 @@ def _apply_torch_compile(pipe):
             setattr(pipe, comp_name, torch.compile(comp, mode="default"))
             print(f"[compile] torch.compile applied to pipe.{comp_name}")
         except Exception as e:  # pragma: no cover - environment dependent
-            print(f"[compile] WARNING: could not compile pipe.{comp_name}: {e}. Continuing without it.")
+            print(
+                f"[compile] WARNING: could not compile pipe.{comp_name}: {e}. Continuing without it."
+            )
     return pipe
 
 
 def _warmup(pipe, args, prompts):
-    """Run one throwaway generation so torch.compile triggers before the timed loop."""
+    """Runs one throwaway generation to trigger compilation.
+
+    Picks the first object that has clean images and its first defect prompt.
+    The result is discarded.
+
+    Args:
+        pipe: Diffusion pipeline.
+        args: Parsed arguments.
+        prompts: Dict mapping object to defect prompts.
+    """
     for object_name, defects in prompts.items():
         clean_images = list_clean_images(args.mvtec_path, object_name)
         if not clean_images:
@@ -204,9 +275,14 @@ def _warmup(pipe, args, prompts):
         break
 
 
+# Main.
+
+
 def main():
+    """Generates synthetic defects for all objects and defect types."""
     args = parse_args()
 
+    # Enable TF32 for faster matmuls on Ampere GPUs.
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cudnn.benchmark = True
@@ -238,16 +314,33 @@ def main():
 
             print(f"[{object_name}/{defect_type}] prompt={prompt}")
             if start_idx > 0:
-                print(f"  resuming from index {start_idx} ({n_new} new image(s) to reach {args.num_images})")
+                print(
+                    f"  resuming from index {start_idx} ({n_new} new image(s) to reach {args.num_images})"
+                )
             print(f"  -> {n_new} new image(s) into {out_dir}")
 
-            # Precompute the text-conditioning ONCE per defect
-            enc = pipe.encode_prompt(prompt, device=args.device, num_images_per_prompt=1, do_classifier_free_guidance=True)
+            # Precompute the text-conditioning ONCE per defect.
+            enc = pipe.encode_prompt(
+                prompt,
+                device=args.device,
+                num_images_per_prompt=1,
+                do_classifier_free_guidance=True,
+            )
             prompt_embeds, neg_embeds = enc[0], enc[1]
 
             indices = list(range(start_idx, args.num_images))
             if indices:
-                _generate_one_defect(pipe, prompt_embeds, neg_embeds, clean_images, out_dir, mask_dir, indices, args.bs, args.no_mask)
+                _generate_one_defect(
+                    pipe,
+                    prompt_embeds,
+                    neg_embeds,
+                    clean_images,
+                    out_dir,
+                    mask_dir,
+                    indices,
+                    args.bs,
+                    args.no_mask,
+                )
 
             print(f"  saved {n_new} new image(s) to {out_dir}")
 

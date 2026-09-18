@@ -3,11 +3,11 @@ Unified image generation script — supports multiple model backends.
 
 Currently supported backends (selectable via ``--backend``):
 
-  • **ip2p**  – InstructPix2Pix (``timbrooks/instruct-pix2pix``)
+  1. **ip2p**  – InstructPix2Pix (``timbrooks/instruct-pix2pix``)
                 Pass a fine-tuned UNet directory with ``--weights_path``
                 or omit it for the vanilla baseline.
 
-  • **flux2** – FLUX.2 Klein 4B (``black-forest-labs/FLUX.2-klein-4B``)
+  2. **flux2** – FLUX.2 Klein 4B (``black-forest-labs/FLUX.2-klein-4B``)
                 Pass a LoRA weights directory with ``--weights_path``
                 or omit it for the vanilla baseline.
 
@@ -23,14 +23,14 @@ This script provides two subcommands:
 
   2. heatmap  – Generate N images with a single model and (optionally) plot
                 a difference-heatmap grid.  Two mutually exclusive modes:
-                  • --test_set : batch mode, iterates over test_set.json
-                  • --prompt   : quick one-off with a CLI prompt and a
+                  1. --test_set : batch mode, iterates over test_set.json
+                  2. --prompt   : quick one-off with a CLI prompt and a
                                  predefined default image for the category.
 
 Usage examples
 ==============
 
-# ── compare (InstructPix2Pix) ────────────────────────────────────────
+# [COMPARE (InstructPix2Pix)]
 # Fine-tuned model:
     uv run generate.py compare \\
         --backend ip2p \\
@@ -48,7 +48,7 @@ Usage examples
         --model_id vanilla \\
         --device cuda:1
 
-# ── compare (FLUX.2 Klein) ───────────────────────────────────────────
+# [COMPARE (FLUX.2 Klein)]
     uv run generate.py compare \\
         --backend flux2 \\
         --test_set ./data_preparation/test_set.json \\
@@ -57,7 +57,7 @@ Usage examples
         --weights_path /path/to/lora/weights \\
         --device cuda:1
 
-# ── heatmap ──────────────────────────────────────────────────────────
+# [HEATMAP]
 # Batch mode – all pairs from the test set:
     uv run generate.py heatmap \\
         --backend ip2p \\
@@ -99,49 +99,40 @@ from diffusers import (
 )
 from tqdm import tqdm
 
-
-###
-### Constants
-###
+# Constants.
 
 # Default input images used by the "heatmap --prompt" mode.
 # Each category maps to a single representative "good" image that is
 # used when you just want to quickly test a prompt from the CLI without
 # looking up the exact path every time.
+MVTEC_PATH = "/home/luca_piai/big_disk/datasets/mvtec/"
 DEFAULT_IMAGES = {
     # MVTec dataset
-    "bottle": "/home/luca_piai/big_disk/datasets/mvtec/bottle/test/good/001.png",
-    "cable": "/home/luca_piai/big_disk/datasets/mvtec/cable/test/good/001.png",
-    "capsule": "/home/luca_piai/big_disk/datasets/mvtec/capsule/test/good/001.png",
-    "carpet": "/home/luca_piai/big_disk/datasets/mvtec/carpet/test/good/001.png",
-    "grid": "/home/luca_piai/big_disk/datasets/mvtec/grid/test/good/001.png",
-    "hazelnut": "/home/luca_piai/big_disk/datasets/mvtec/hazelnut/test/good/011.png",
-    "leather": "/home/luca_piai/big_disk/datasets/mvtec/leather/test/good/001.png",
-    "metal_nut": "/home/luca_piai/big_disk/datasets/mvtec/metal_nut/test/good/001.png",
-    "pill": "/home/luca_piai/big_disk/datasets/mvtec/pill/test/good/013.png",
-    "screw": "/home/luca_piai/big_disk/datasets/mvtec/screw/test/good/001.png",
-    "tile": "/home/luca_piai/big_disk/datasets/mvtec/tile/test/good/001.png",
-    "toothbrush": "/home/luca_piai/big_disk/datasets/mvtec/toothbrush/test/good/001.png",
-    "transistor": "/home/luca_piai/big_disk/datasets/mvtec/transistor/test/good/003.png",
-    "wood": "/home/luca_piai/big_disk/datasets/mvtec/wood/test/good/001.png",
-    "zipper": "/home/luca_piai/big_disk/datasets/mvtec/zipper/test/good/001.png",
+    "bottle":     "bottle/test/good/001.png",
+    "cable":      "cable/test/good/001.png",
+    "capsule":    "capsule/test/good/001.png",
+    "carpet":     "carpet/test/good/001.png",
+    "grid":       "grid/test/good/001.png",
+    "hazelnut":   "hazelnut/test/good/011.png",
+    "leather":    "leather/test/good/001.png",
+    "metal_nut":  "metal_nut/test/good/001.png",
+    "pill":       "pill/test/good/013.png",
+    "screw":      "screw/test/good/001.png",
+    "tile":       "tile/test/good/001.png",
+    "toothbrush": "toothbrush/test/good/001.png",
+    "transistor": "transistor/test/good/003.png",
+    "wood":       "wood/test/good/001.png",
+    "zipper":     "zipper/test/good/001.png",
 }
 
 # Base directory where "compare" stores generated images.
 # Each model gets its own sub-folder: ./output/<model_id>/
 OUTPUT_BASE_PATH = "./output/"
 
-
-###
-### Backend registry
-###
+# Backend registry.
 #
-# To add a new model backend:
-#   1. Write a loader function:  def _load_<name>(weights_path, device) -> pipeline
-#   2. Register it:              BACKENDS["<name>"] = {"loader": _load_<name>, "description": "..."}
-#
-# The loader receives *weights_path* (str | None) and *device* (str).
-# It must return a pipeline object whose __call__ accepts (prompt=, image=).
+# To add a new backend, define a loader function ``_load_<name>(weights_path, device) -> pipeline``
+# and register it in ``BACKENDS``.
 #
 
 
@@ -170,7 +161,8 @@ def _load_ip2p(weights_path, device):
     else:
         print(f"[ip2p] Loading custom UNet from {weights_path}...")
         trained_unet = UNet2DConditionModel.from_pretrained(
-            weights_path, torch_dtype=dtype,
+            weights_path,
+            torch_dtype=dtype,
         )
         pipe = StableDiffusionInstructPix2PixPipeline.from_pretrained(
             base_model_id,
@@ -220,8 +212,7 @@ def _load_flux2(weights_path, device):
     return pipe
 
 
-# ── Registry ──────────────────────────────────────────────────────────
-# Each entry maps a backend name to its loader function and a short
+# Backend registry.
 # human-readable description shown in --help.
 BACKENDS = {
     "ip2p": {
@@ -248,17 +239,12 @@ def load_pipeline(backend, weights_path, device):
         A ready-to-use pipeline.
     """
     if backend not in BACKENDS:
-        raise ValueError(
-            f"Unknown backend '{backend}'. "
-            f"Available: {list(BACKENDS.keys())}"
-        )
+        raise ValueError(f"Unknown backend '{backend}'. " f"Available: {list(BACKENDS.keys())}")
     loader_fn = BACKENDS[backend]["loader"]
     return loader_fn(weights_path, device)
 
 
-###
-### Shared helpers
-###
+# Shared helpers.
 
 
 def generate_image(pipe, image_path, prompt, steps):
@@ -284,8 +270,7 @@ def generate_image(pipe, image_path, prompt, steps):
     return output
 
 
-def plot_grid(image_paths, prompts, output_filename="grid.png",
-              use_heatmap=False):
+def plot_grid(image_paths, prompts, output_filename="grid.png", use_heatmap=False):
     """Plot images in a grid with an optional heatmap row.
 
     Row 1: The images (Input + Generated outputs).
@@ -305,7 +290,8 @@ def plot_grid(image_paths, prompts, output_filename="grid.png",
 
     num_rows = 2 if use_heatmap else 1
     fig, axes = plt.subplots(
-        num_rows, num_images,
+        num_rows,
+        num_images,
         figsize=(num_images * 5, 5 * num_rows + (2 if use_heatmap else 1)),
         squeeze=False,
     )
@@ -320,8 +306,7 @@ def plot_grid(image_paths, prompts, output_filename="grid.png",
             img = Image.open(img_path).convert("RGB").resize((512, 512))
             img_np = np.array(img).astype(np.float32) / 255.0
         except Exception as e:
-            print(f"Warning: Could not load {img_path}. "
-                  f"Using a placeholder. ({e})")
+            print(f"Warning: Could not load {img_path}. " f"Using a placeholder. ({e})")
             img = Image.new("RGB", (512, 512), color="lightgray")
             img_np = np.zeros((512, 512, 3), dtype=np.float32)
 
@@ -332,14 +317,12 @@ def plot_grid(image_paths, prompts, output_filename="grid.png",
         # First column is always the original input image.
         if i == 0:
             input_img_np = img_np  # cache for heatmap subtraction later
-            ax_img.set_title("Input Image", fontsize=16, fontweight="bold",
-                             pad=15)
+            ax_img.set_title("Input Image", fontsize=16, fontweight="bold", pad=15)
             if use_heatmap:
                 # Show a blank (all-zero) heatmap under the input as
                 # a visual anchor for the row.
                 ax_heat = axes[1, i]
-                ax_heat.imshow(np.zeros((512, 512)), cmap="jet",
-                               vmin=0, vmax=1)
+                ax_heat.imshow(np.zeros((512, 512)), cmap="jet", vmin=0, vmax=1)
                 ax_heat.set_xticks([])
                 ax_heat.set_yticks([])
         else:
@@ -360,7 +343,9 @@ def plot_grid(image_paths, prompts, output_filename="grid.png",
                 diff = np.abs(img_np - input_img_np).mean(axis=2)
                 ax_heat.set_title("Heatmap", fontsize=14, pad=15)
                 ax_heat.imshow(
-                    diff, cmap="jet", vmin=0,
+                    diff,
+                    cmap="jet",
+                    vmin=0,
                     vmax=np.max(diff) if np.max(diff) > 0 else 1,
                 )
                 ax_heat.set_xticks([])
@@ -368,8 +353,7 @@ def plot_grid(image_paths, prompts, output_filename="grid.png",
 
             # Always place the prompt below the generated image (first row).
             if wrapped_prompt:
-                ax_img.set_xlabel(wrapped_prompt, fontsize=12,
-                                  style="italic", labelpad=12)
+                ax_img.set_xlabel(wrapped_prompt, fontsize=12, style="italic", labelpad=12)
 
     plt.tight_layout()
     plt.subplots_adjust(
@@ -381,9 +365,8 @@ def plot_grid(image_paths, prompts, output_filename="grid.png",
     print(f"Grid saved to {output_filename}")
 
 
-###
-### Subcommand: compare
-###
+# Subcommand: compare.
+
 
 def cmd_compare(args):
     """Generate images for model comparison (incremental).
@@ -440,7 +423,8 @@ def cmd_compare(args):
     # Build the list of indices that still need generation:
     # either the slot is empty (None) or the file was deleted from disk.
     to_generate = [
-        i for i in range(len(inputs))
+        i
+        for i in range(len(inputs))
         if model_outputs[i] is None or not os.path.exists(model_outputs[i])
     ]
 
@@ -479,16 +463,15 @@ def cmd_compare(args):
     print(f"Done! Results saved to {results_path}")
 
 
-###
-### Subcommand: heatmap
-###
+# Subcommand: heatmap.
+
 
 def cmd_heatmap(args):
     """Generate images + optional heatmap grids.
 
     Two modes (mutually exclusive via argparse):
-      • --test_set : iterate over every (image, prompt) pair in the JSON.
-      • --prompt   : use a single CLI prompt with the default image for
+      1. --test_set : iterate over every (image, prompt) pair in the JSON.
+      2. --prompt   : use a single CLI prompt with the default image for
                      the chosen category (see DEFAULT_IMAGES).
 
     For each pair, *num_images* variants are generated and saved.  Then a
@@ -506,10 +489,12 @@ def cmd_heatmap(args):
                 f"Category '{args.category}' not found in {args.test_set}. "
                 f"Available: {list(test_set.keys())}"
             )
-        pairs = list(zip(
-            test_set[args.category]["inputs"],
-            test_set[args.category]["prompts"],
-        ))
+        pairs = list(
+            zip(
+                test_set[args.category]["inputs"],
+                test_set[args.category]["prompts"],
+            )
+        )
     elif args.prompt:
         if args.category not in DEFAULT_IMAGES:
             raise ValueError(
@@ -556,27 +541,30 @@ def cmd_heatmap(args):
     print("\nAll done!")
 
 
-###
-### CLI
-###
+# CLI.
+
 
 def _add_common_args(parser):
     """Add arguments shared by all subcommands (backend, weights, device)."""
-    backends_help = ", ".join(
-        f"{name} ({info['description']})" for name, info in BACKENDS.items()
-    )
+    backends_help = ", ".join(f"{name} ({info['description']})" for name, info in BACKENDS.items())
     parser.add_argument(
-        "--backend", type=str, required=True,
+        "--backend",
+        type=str,
+        required=True,
         choices=list(BACKENDS.keys()),
         help=f"Model backend to use. Available: {backends_help}",
     )
     parser.add_argument(
-        "--weights_path", type=str, default=None,
+        "--weights_path",
+        type=str,
+        default=None,
         help="Path to fine-tuned weights (UNet dir for ip2p, LoRA dir for "
-             "flux2). Omit for the vanilla baseline.",
+        "flux2). Omit for the vanilla baseline.",
     )
     parser.add_argument(
-        "--device", type=str, required=True,
+        "--device",
+        type=str,
+        required=True,
         help="CUDA device (e.g. cuda:1)",
     )
 
@@ -587,53 +575,71 @@ def main():
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # ── compare ───────────────────────────────────────────────────────
+    # [COMPARE]
     p_cmp = subparsers.add_parser(
         "compare",
         help="Generate images for model comparison (incremental).",
     )
     _add_common_args(p_cmp)
-    p_cmp.add_argument("--test_set", type=str, required=True,
-                       help="Path to test_set.json")
-    p_cmp.add_argument("--results", type=str, default="results.json",
-                       help="Path to results.json (default: results.json)")
-    p_cmp.add_argument("--category", type=str, required=True,
-                       help="Object category (e.g. hazelnut, pill)")
-    p_cmp.add_argument("--steps", type=int, default=20,
-                        help="Number of inference steps (default: 20)")
-    p_cmp.add_argument("--model_id", type=str, required=True,
-                       help="Name for this model run")
+    p_cmp.add_argument("--test_set", type=str, required=True, help="Path to test_set.json")
+    p_cmp.add_argument(
+        "--results",
+        type=str,
+        default="results.json",
+        help="Path to results.json (default: results.json)",
+    )
+    p_cmp.add_argument(
+        "--category", type=str, required=True, help="Object category (e.g. hazelnut, pill)"
+    )
+    p_cmp.add_argument(
+        "--steps", type=int, default=20, help="Number of inference steps (default: 20)"
+    )
+    p_cmp.add_argument("--model_id", type=str, required=True, help="Name for this model run")
     p_cmp.set_defaults(func=cmd_compare)
 
-    # ── heatmap ───────────────────────────────────────────────────────
+    # [HEATMAP]
     p_heat = subparsers.add_parser(
         "heatmap",
         help="Generate images + optional heatmap grid.",
     )
     _add_common_args(p_heat)
     mode = p_heat.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--test_set", type=str,
-                      help="Path to test_set.json (batch mode)")
-    mode.add_argument("--prompt", type=str,
-                      help="Single prompt (quick-test mode)")
+    mode.add_argument("--test_set", type=str, help="Path to test_set.json (batch mode)")
+    mode.add_argument("--prompt", type=str, help="Single prompt (quick-test mode)")
 
-    p_heat.add_argument("--category", type=str, required=True,
-                        help="Object category (e.g. hazelnut, pill)")
-    p_heat.add_argument("--output_dir", type=str,
-                        default="./output_heatmap/",
-                        help="Output directory (default: ./output_heatmap/)")
-    p_heat.add_argument("--num_images", type=int, default=3,
-                        help="Images to generate per prompt (default: 3)")
-    p_heat.add_argument("--steps", type=int, default=20,
-                        help="Number of inference steps (default: 20)")
-    p_heat.add_argument("--heatmap", action="store_true", default=True,
-                        help="Enable heatmap row (default: on)")
-    p_heat.add_argument("--no-heatmap", action="store_false", dest="heatmap",
-                        help="Disable heatmap row")
+    p_heat.add_argument(
+        "--category", type=str, required=True, help="Object category (e.g. hazelnut, pill)"
+    )
+    p_heat.add_argument(
+        "--mvtec_path", type=str, default=MVTEC_PATH, help="Path to the MVTEC dataset"
+    )
+    # Update DEFAULT_IMAGES to use the user-provided MVTEC_PATH
+    for cat, path in DEFAULT_IMAGES.items():
+        DEFAULT_IMAGES[cat] = f"{MVTEC_PATH}{path}"
+    p_heat.add_argument(
+        "--output_dir",
+        type=str,
+        default="./output_heatmap/",
+        help="Output directory (default: ./output_heatmap/)",
+    )
+    p_heat.add_argument(
+        "--num_images", type=int, default=3, help="Images to generate per prompt (default: 3)"
+    )
+    p_heat.add_argument(
+        "--steps", type=int, default=20, help="Number of inference steps (default: 20)"
+    )
+    p_heat.add_argument(
+        "--heatmap", action="store_true", default=True, help="Enable heatmap row (default: on)"
+    )
+    p_heat.add_argument(
+        "--no-heatmap", action="store_false", dest="heatmap", help="Disable heatmap row"
+    )
     p_heat.set_defaults(func=cmd_heatmap)
 
     args = parser.parse_args()
     args.func(args)
+
+
 
 
 if __name__ == "__main__":
