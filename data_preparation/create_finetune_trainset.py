@@ -31,8 +31,8 @@ VISA_CATEGORIES = [None]
 VISA_URL = "https://huggingface.co/datasets/visualanom/mirage_mvtec_visa/resolve/main/visa/generation_tracking.csv"
 MVTEC_URL = "https://huggingface.co/datasets/visualanom/mirage_mvtec_visa/resolve/main/mvtec/generation_tracking.csv"
 
-VISA_CSV = "visa_generation_tracking.csv"
-MVTEC_CSV = "mvtec_generation_tracking_augmented.csv"
+VISA_CSV = "csv/visa_generation_tracking.csv"
+MVTEC_CSV = "csv/mvtec_generation_tracking_augmented.csv"
 
 
 # Helpers.
@@ -200,6 +200,7 @@ def main():
     )
 
     if args.download:
+        os.makedirs("csv", exist_ok=True)
         download_file(VISA_URL, VISA_CSV)
         download_file(MVTEC_URL, MVTEC_CSV)
         print("Cleaning MVTEC cable prompt...")

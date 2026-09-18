@@ -28,9 +28,9 @@ from collections import defaultdict
 from openai import OpenAI
 
 # Settings
-INPUT_CSV = "mvtec_generation_tracking.csv"
-OUTPUT_CSV = "mvtec_generation_tracking_augmented.csv"
-JSON_FILE = "augmented_prompts.json"
+INPUT_CSV = "csv/mvtec_generation_tracking.csv"
+OUTPUT_CSV = "csv/mvtec_generation_tracking_augmented.csv"
+JSON_FILE = "json/augmented_prompts.json"
 
 
 # Helpers.
