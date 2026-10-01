@@ -1,5 +1,22 @@
 # Anomaly Instruct Pix2Pix
 
+Pipeline for generating synthetic anomalies usable as training data for Visual
+Anomaly Detection (VAD) models.
+
+## Pipeline overview
+
+1. **Fine-tune** InstructPix2Pix on the MIRAGE dataset, a collection of
+   edit pairs distilled from Gemini Nano Banana. 
+2. **Generate** an evaluation set of synthetic defects from clean MVTec images
+   with the fine-tuned model.
+3. **Evaluate** generation quality (KID score) and downstream utility
+   by training VAD models (classification + localization) on the synthetic
+   defects and testing on real MVTec.
+4. **Align** the generator with Diffusion-DPO preference optimization to improve
+   image quality beyond the SFT baseline.
+
+## Training
+
 Fine-tune instruct pix2pix:
 
 ```bash
@@ -86,4 +103,58 @@ CUDA_VISIBLE_DEVICES=1,2,3 accelerate launch finetune_instruct_pix2pix_dpo.py \
   --torch_compile \
   --report_to="wandb" \
   --seed=42 \
+```
+
+## Evaluation
+
+### Generate the evaluation set
+
+```bash
+uv run eval/generate_evalset.py \
+  --device cuda:1 \
+  --weights_path="<PATH TO FINETUNED UNET>" \
+  --input_json="eval/defect_prompts.json" \
+  --output_dir="<PATH>" \
+  --num_images=20
+```
+
+### Compute KID
+
+```bash
+uv run eval/compute_kid.py \
+  --device cuda:1 \
+  --real_path="<PATH TO MVTEC>" \
+  --generated_path="<PATH>"
+```
+
+### Classification (train / test)
+
+```bash
+uv run eval/train-classification.py \
+  --device cuda:1 \
+  --mvtec_path="<PATH>" \
+  --generated_path="<PATH>" \
+  --checkpoint_path="eval/checkpoints/classification"
+
+uv run eval/test-classification.py \
+  --device cuda:1 \
+  --mvtec_path="<PATH>" \
+  --generated_path="<PATH>" \
+  --checkpoint_path="eval/checkpoints/classification"
+```
+
+### Localization (train / test)
+
+```bash
+uv run eval/train-localization.py \
+  --device cuda:1 \
+  --mvtec_path="<PATH>" \
+  --generated_path="<PATH>" \
+  --checkpoint_path="eval/checkpoints/localization"
+
+uv run eval/test-localization.py \
+  --device cuda:1 \
+  --mvtec_path="<PATH>" \
+  --generated_path="<PATH>" \
+  --checkpoint_path="eval/checkpoints/localization"
 ```
