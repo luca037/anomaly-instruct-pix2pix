@@ -1,3 +1,8 @@
+
+<div align="center">
+<img width="688" height="186" alt="icon" src="https://github.com/user-attachments/assets/b2bd0ce6-6ce0-420d-9593-893fd021b0ac" />
+</div>
+
 # Anomaly Instruct Pix2Pix
 
 Pipeline for generating synthetic anomalies usable as training data for Visual
