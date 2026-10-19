@@ -320,7 +320,7 @@ def main():
             print(f"  -> {n_new} new image(s) into {out_dir}")
 
             # Precompute the text-conditioning ONCE per defect.
-            enc = pipe.encode_prompt(
+            enc = pipe._encode_prompt(
                 prompt,
                 device=args.device,
                 num_images_per_prompt=1,
