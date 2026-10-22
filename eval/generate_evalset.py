@@ -69,8 +69,9 @@ def parse_args():
     parser.add_argument(
         "--weights_path",
         type=str,
-        required=True,
-        help="Path to the fine-tuned ip2p UNet checkpoint directory.",
+        default=None,
+        help="Path to the fine-tuned ip2p UNet checkpoint directory. "
+        "Omit for the vanilla (un-finetuned) baseline.",
     )
     parser.add_argument(
         "--input_json",
